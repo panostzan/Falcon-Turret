@@ -80,6 +80,23 @@ def test():
     huge = sm.current(5.5, scene_thumb(60 * W / 80))           # an untrustworthy jump is ignored, not followed
     assert np.allclose(huge, scene_map(0), atol=1e-4)
 
+    # 3b. a small part that moved since the depth was computed (an arm) is marked stale; the still part is not
+    sm = depth_nn.DepthSmoother()
+    base_th = scene_thumb()
+    sm.update(scene_map(0), 7.0, base_th, 7.0)
+    assert sm.stale_mask(base_th).max() == 0.0, "an unchanged picture has nothing stale"
+    moved_th = base_th.copy()
+    moved_th[10:30, 55:75] = 250.0                              # a bright arm sweeps into one corner
+    mask = sm.stale_mask(moved_th)
+    assert mask[15:25, 60:70].mean() > 0.9 and mask[40:60, 0:30].max() < 0.05, (mask[15:25, 60:70].mean(), mask[40:60, 0:30].max())
+    frame = np.full((480, 640, 3), 100, np.uint8)
+    plain = depth_nn.overlay(frame, scene_map(0))
+    faded = depth_nn.overlay(frame, scene_map(0), stale=mask)
+    sy, sx = 15 * 480 // 60 + 40, 65 * 640 // 80
+    assert abs(int(faded[sy, sx].mean()) - 100) < 12
+    assert np.abs(faded[200:300, 100:200].astype(int) - plain[200:300, 100:200]).max() <= 2, "the still part must not change"
+    assert np.abs(faded[sy - 20:sy + 20, sx - 20:sx + 20].astype(int) - 100).mean() < np.abs(plain[sy - 20:sy + 20, sx - 20:sx + 20].astype(int) - 100).mean()
+
     # 4. the same result fed twice is ignored; reset clears
     sm.update(scene_map(0), 5.0, scene_thumb(0), 6.0)
     sm.reset()

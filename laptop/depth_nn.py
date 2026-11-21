@@ -38,12 +38,15 @@ def normalize(depth, previous=None):
     return np.clip((depth - lo) / (hi - lo), 0, 1).astype(np.float32), (lo, hi)
 
 
-def overlay(frame_bgr, depth01, alpha=0.55):
+def overlay(frame_bgr, depth01, alpha=0.55, stale=None):
     """Lay the depth heatmap (warm = near, cool = far) over the picture, with a small legend that says it is estimated."""
     h, w = frame_bgr.shape[:2]
     d = cv2.resize(depth01, (w, h), interpolation=cv2.INTER_CUBIC)
     col = cv2.applyColorMap((255 * np.clip(d, 0, 1)).astype(np.uint8), cv2.COLORMAP_TURBO)
     out = cv2.addWeighted(frame_bgr, 1 - alpha, col, alpha, 0)
+    if stale is not None:                      # where the depth is out of date, show the real picture instead
+        m = cv2.resize(stale, (w, h), interpolation=cv2.INTER_LINEAR)
+        out = cv2.blendLinear(out, frame_bgr, 1.0 - m, m)
     bar = cv2.applyColorMap(np.tile(np.linspace(0, 255, 120, dtype=np.uint8), (8, 1)), cv2.COLORMAP_TURBO)
     x0, y0 = 10, h - 30
     cv2.rectangle(out, (x0 - 4, y0 - 16), (x0 + 124, y0 + 22), (20, 20, 20), -1)
@@ -103,7 +106,7 @@ class DepthSmoother:
             # How much did the picture change since the previous result? When it changed a lot (things are moving), old
             # depth is stale: skip the averaging and fade fast, so the overlay follows the movement instead of ghosting.
             if self.src is not None and thumb is not None:
-                self.motion = smoothstep((float(np.abs(thumb - self.src).mean()) - 2.0) / 8.0)
+                self.motion = smoothstep((float((np.abs(thumb - self.src) > 20).mean()) - 0.01) / 0.08)
             self.shown_from = self.current(now, thumb)            # start the fade from exactly what is on screen now
             keep = self.KEEP * (1.0 - self.motion)
             self.target = keep * self.target + (1 - keep) * depth
@@ -122,6 +125,19 @@ class DepthSmoother:
         if abs(dx) < 0.3 and abs(dy) < 0.3:                     # measurement noise, not movement
             return 0.0, 0.0
         return dx, dy
+
+    def stale_mask(self, thumb):
+        """Where the live picture no longer matches the one the depth was computed from (something moved there since),
+        as a 0..1 map at thumbnail size, or None. The overlay fades out there, so a fast-moving arm shows the real video
+        instead of an out-of-date depth. Camera movement is compensated first, so panning does not mark everything."""
+        if self.src is None or thumb is None:
+            return None
+        src = self.src
+        dx, dy = self._shift(thumb)
+        if dx or dy:
+            src = cv2.warpAffine(src, np.float32([[1, 0, dx], [0, 1, dy]]), THUMB, borderMode=cv2.BORDER_REPLICATE)
+        diff = cv2.GaussianBlur(np.abs(thumb - src), (5, 5), 0)
+        return np.clip((diff - 10.0) / 25.0, 0.0, 1.0).astype(np.float32)
 
     def current(self, now, thumb=None):
         """The depth map to show right now (the fade, then the motion compensation)."""

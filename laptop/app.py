@@ -78,7 +78,7 @@ def set_tracking(on):
         return ctl["error"]
 
 
-depth_state = {"net": None, "error": None, "smoother": DepthSmoother()}     # the neural depth layer (off by default)
+depth_state = {"net": None, "error": None, "smoother": DepthSmoother(), "stale": None}     # the neural depth layer (off by default)
 last_seen = LastSeen()                         # last confirmed position, for the ghost and the search status
 trail = deque(maxlen=45)                       # recent target positions, for the Trail layer
 trail_seen = [0.0]                             # when the target was last seen (the trail clears after a second without it)
@@ -99,6 +99,7 @@ def depth_map(frame):
     depth_state["error"] = None
     net.submit(frame)
     if not view["smooth"]:                                      # raw: the newest result as it is (steps at the network's rate)
+        depth_state["stale"] = None
         result = net.latest()
         return result[0] if result else None
     full = net.latest_full()
@@ -106,12 +107,13 @@ def depth_map(frame):
         return None
     sm, now, thumb = depth_state["smoother"], time.time(), thumbnail(frame)
     sm.update(full[0], full[1], full[2], now)
+    depth_state["stale"] = sm.stale_mask(thumb)
     return sm.current(now, thumb)
 
 
 def apply_depth(frame, dmap):
     """Lay the depth heatmap over the picture when the Depth layer is on."""
-    return depth_overlay(frame, dmap) if (view["depth"] and dmap is not None) else frame
+    return depth_overlay(frame, dmap, stale=depth_state["stale"]) if (view["depth"] and dmap is not None) else frame
 
 
 LIME, AMBER = (58, 226, 182), (0, 176, 255)     # BGR
