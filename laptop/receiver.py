@@ -53,7 +53,9 @@ def find_pi_ip():
 def _spawn(quality):
     return subprocess.Popen(
         ["ssh", "-i", KEY, "-o", "MACs=hmac-sha2-256", "-o", "BatchMode=yes",
-         "-o", "ServerAliveInterval=5", f"{USER}@{find_pi_ip()}", f"python3 ~/bin/pi_stream.py {FPS} {quality}"],
+         "-o", "ServerAliveInterval=5",
+         # the Pi's IP changes, but its identity does not: trust its saved key under a fixed name, refuse any other host
+         "-o", "HostKeyAlias=qnxpi", "-o", "StrictHostKeyChecking=yes", f"{USER}@{find_pi_ip()}", f"python3 ~/bin/pi_stream.py {FPS} {quality}"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
 
 

@@ -14,6 +14,7 @@ C270 -> Pi (QNX) --SSH/Wi-Fi--> laptop --USB serial (COM7) or UDP--> ESP32 -> pa
 2. `python laptop/app.py`, then open http://localhost:8000.
 3. Click **Teal** (or click the target), then **Tracking: ON**. "Show color match" tints the pixels the filter accepts.
 
+The Pi's SSH key is pinned under the alias `qnxpi` in `~/.ssh/known_hosts` (so a new IP address needs no re-trusting).
 Settings: `GIMBAL` env var picks the ESP link (`COM7` default, or `udp:192.168.137.50`); `PI_HOST` overrides the
 Pi address (normally found by its MAC address, because the hotspot changes its IP).
 

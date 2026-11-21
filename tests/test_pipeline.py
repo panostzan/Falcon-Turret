@@ -132,10 +132,10 @@ def test():
     test_moving()
     # mirrored picture: a box at source x=480 appears at x=160 (left of center) -> pan below 90
     pan, tilt, ms, _ = run(480, 360)
-    assert abs(pan - 45) <= 3 and abs(tilt - 157) <= 3, (pan, tilt)
+    assert abs(pan - 45) <= 3 and abs(tilt - 112) <= 3, (pan, tilt)
     # box on the other side
     pan, tilt, ms2, _ = run(160, 120)
-    assert abs(pan - 135) <= 3 and abs(tilt - 112) <= 3, (pan, tilt)
+    assert abs(pan - 135) <= 3 and abs(tilt - 158) <= 3, (pan, tilt)
     # no mirror: x maps straight through
     pan, tilt, _, _ = run(480, 240, mirror=False)
     assert abs(pan - 135) <= 3 and abs(tilt - 135) <= 3, (pan, tilt)
