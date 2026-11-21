@@ -80,6 +80,22 @@ def test():
     assert len(esp.log) == log_before or esp.log[log_before:] == ["P83"] or True
     assert "didn't understand" in run(g, "banana")
 
+    run(g, "c")                                              # commands typed without spaces, or with brackets
+    run(g, "p90")
+    assert esp.pan == 90
+    run(g, "p10")
+    assert esp.pan == 10
+    run(g, "t30")
+    assert esp.tilt == 30
+    run(g, "t<20>")
+    assert esp.tilt == 20
+    run(g, "t+3")
+    assert esp.tilt == 23
+    run(g, "p-5")
+    assert esp.pan == 5
+    run(g, "P 40", "T 12")                                   # capitals too
+    assert (esp.pan, esp.tilt) == (40, 12)
+
     run(g, "d")                                              # release and resume
     assert esp.limp and "limp" in run(g, "d")
     run(g, "a")
