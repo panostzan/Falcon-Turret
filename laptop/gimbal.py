@@ -1,7 +1,7 @@
 """Serial driver for the ESP32 pan/tilt gimbal (firmware: Arduino/gimbal/gimbal.ino).
 
 Protocol (115200 baud, newline-terminated):
-    P<0-180>   pan to angle        T<0-45>   tilt to angle (this gimbal's bracket stops at 45)
+    P<0-180>   pan to angle        T<90-180> tilt to angle
     C          home                S          report status
     D          release (servos go limp)   A  resume
 Every accepted command is answered with "P<pan> T<tilt>"; bad input gets "ERR ...".

@@ -1,12 +1,12 @@
 // Wi-Fi version of gimbal.ino: same pins, same commands, same replies; commands arrive as UDP packets
 // (port 4210) as well as over USB serial. Replies go back to whoever sent the command.
 //
-// Commands (one per packet / line):  P<0-180> pan   T<0-45> tilt   C home   S status   D release (servos go limp)
+// Commands (one per packet / line):  P<0-180> pan   T<90-180> tilt   C home   S status   D release (servos go limp)
 //                                    A resume (re-attach and hold the last angles)
 //                                    W widen tilt to 0-180 (for finding the real travel)   N back to the safe tilt range
 // The widened range lasts only until the ESP reboots or N is sent.
 // Reply: "P<pan> T<tilt>" or "ERR ...". Any P/T/C command re-attaches released servos.
-// SAFETY: the tilt bracket only allows 0-45 degrees, so the firmware itself refuses to go outside that,
+// SAFETY: the firmware itself refuses angles outside the gimbal's travel (pan 0-180, tilt 90-180),
 // whatever the host sends (angles are clamped, never passed through).
 #include <Arduino.h>
 #include <WiFi.h>
@@ -16,8 +16,8 @@
 
 const uint16_t UDP_PORT = 4210;
 const int PAN_PIN = 19, TILT_PIN = 18;
-const int PAN_MIN = 0, PAN_MAX = 180, TILT_MIN = 0, TILT_MAX = 45;   // physical travel of this gimbal
-const int PAN_HOME = 90, TILT_HOME = 22;                              // start position (middle of each range)
+const int PAN_MIN = 0, PAN_MAX = 180, TILT_MIN = 90, TILT_MAX = 180;   // physical travel of this gimbal
+const int PAN_HOME = 90, TILT_HOME = 135;                             // start position (middle of each range)
 
 Servo panServo, tiltServo;
 int panAngle = PAN_HOME, tiltAngle = TILT_HOME;

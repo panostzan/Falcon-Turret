@@ -33,9 +33,9 @@ def bad(data):
 
 
 def test():
-    # the real file: tilt travel is 0-45 degrees (the bracket's stops), pan the full 0-180, home inside both
+    # the real file: the working setup, pan 0-180 and tilt 90-180 with home 90 / 135, home inside both
     pan, tilt, center = gimbal.load_limits(REAL)
-    assert pan == (0, 180) and tilt == (0, 45), (pan, tilt)
+    assert pan == (0, 180) and tilt == (90, 180) and center == (90, 135), (pan, tilt, center)
     assert tilt[0] <= center[1] <= tilt[1] and pan[0] <= center[0] <= pan[1]
     assert (gimbal.PAN_RANGE, gimbal.TILT_RANGE, gimbal.CENTER) == (pan, tilt, center)
 
@@ -74,28 +74,28 @@ for mode in ("map", "follow"):
         assert not bad, (mode, sign, bad[:3])
 # the same through the real Gimbal driver (its own clamp is the last software layer)
 class Link:
-    def __init__(self): self.log = []; self.out = b"P90 T22\r\n"
-    def write(self, d): self.log.append(d.decode().strip()); self.out = b"P90 T22\r\n"
+    def __init__(self): self.log = []; self.out = b"P90 T135\r\n"
+    def write(self, d): self.log.append(d.decode().strip()); self.out = b"P90 T135\r\n"
     def readline(self): return self.out
     def close(self): pass
 link = Link(); g = Gimbal(link=link)
 for t in (-50, 0, 10, 45, 46, 90, 135, 180, 400):
     g.move_to(tilt=t)
 tilts = [int(c[1:]) for c in link.log if c.startswith("T")]
-assert tilts and all(0 <= t <= 45 for t in tilts), tilts
+assert tilts and all(TILT_RANGE[0] <= t <= TILT_RANGE[1] for t in tilts), tilts
 for p in (-10, 0, 90, 180, 500):
     g.move_to(pan=p)
 pans = [int(c[1:]) for c in link.log if c.startswith("P")]
 assert pans and all(0 <= p <= 180 for p in pans), pans
 g.center()
-assert link.log[-2:] == ["P90", "T22"], link.log[-2:]
+assert link.log[-2:] == [f"P{CENTER[0]}", f"T{CENTER[1]}"], link.log[-2:]
 print("ok")
 ''' % (LAPTOP,)
     env = {k: v for k, v in os.environ.items()}
     env["TURRET_LIMITS"] = REAL
     r = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, env=env)
     assert r.returncode == 0 and r.stdout.strip() == "ok", r.stdout + r.stderr
-    print("gimbal limits tests passed (no angle ever left pan 0-180 / tilt 0-45)")
+    print("gimbal limits tests passed (no angle ever left the ranges in limits.json)")
 
 
 if __name__ == "__main__":

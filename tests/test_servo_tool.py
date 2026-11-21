@@ -3,7 +3,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-os.environ["TURRET_LIMITS"] = os.path.join(HERE, "..", "laptop", "limits.json")   # the real limits: pan 0-180, tilt 0-45
+os.environ["TURRET_LIMITS"] = os.path.join(HERE, "limits_small_tilt.json")   # a small-tilt test world: pan 0-180, tilt 0-45
 sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 sys.path.insert(0, os.path.join(HERE, "..", "laptop"))
 import servo_test   # noqa: E402
