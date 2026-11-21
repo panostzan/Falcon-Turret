@@ -56,6 +56,15 @@ dot shows the aim point. In simulation (target seen 250 ms late, 15 fps, noise) 
 constant speed, 29 to 10 px for stop-and-go, and 84 to 60 px for a fast swing; a still target does not jitter more.
 The true delay has not been measured on the hardware yet: use `tools/latency_test.py`, then set the slider to match.
 
+## Neural depth layer (optional, off by default)
+`laptop/depth_nn.py` estimates dense RELATIVE depth from one camera with Depth Anything V2 Small (ONNX, CPU, Apache-2.0):
+about 5-7 fps on a laptop CPU at 308x224, on its own thread so the video is not slowed. It is an estimate, not a measurement,
+so it is shown as a see-through overlay labelled "estimated, relative". Switch it on with the dashboard's "Depth (estimated)"
+button. It runs on the clean picture AFTER the teal tracker has found the target, so it cannot disturb tracking.
+Setup: `pip install onnxruntime`, and download `onnx/model.onnx` from `onnx-community/depth-anything-v2-small` on Hugging Face
+to `models/depth_model.onnx` (about 94 MB; `models/` is git-ignored). Without them the layer just reports why it cannot start.
+Try it on a laptop camera: `python tools/depth_live.py --camera 1`.
+
 ## Latency design
 - `receiver.FrameFeed` reads the Pi stream on its own thread and keeps only the newest frame (stale frames are dropped, not
   queued). The dashboard shows how long each frame waited and how many were dropped.

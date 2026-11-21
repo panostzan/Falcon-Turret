@@ -25,6 +25,7 @@ from gimbal import AsyncGimbal     # noqa: E402
 from predict import LeadPredictor  # noqa: E402
 from receiver import FrameFeed       # noqa: E402
 from telemetry import Telemetry    # noqa: E402
+from depth_nn import NeuralDepth, overlay as depth_overlay   # noqa: E402  (loads onnxruntime only when the layer is first switched on)
 from tracker import PRESETS, ColorTracker   # noqa: E402
 
 # "COM7" for USB serial, or e.g. "udp:192.168.137.50" for the Wi-Fi firmware. Override: set GIMBAL=udp:...
@@ -39,7 +40,7 @@ tracker = ColorTracker()
 # This turret's servo directions (+1 = angle grows as the target goes right / down in the picture). Tilt is -1: tested
 # on the real turret, the other way pointed the wrong direction. The dashboard's Flip buttons change these live.
 DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
-view = {"mirror": True, "vflip": False, "mask": False}   # flip the picture so it matches the real world (set from the dashboard)
+view = {"mirror": True, "vflip": False, "mask": False, "depth": False}   # flip the picture so it matches the real world (set from the dashboard)
 cfg = {"lead_ms": 0}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
                                      # to about the measured camera-to-servo delay, using the dashboard slider)
 predictor = LeadPredictor()
@@ -68,18 +69,39 @@ def set_tracking(on):
         return ctl["error"]
 
 
+depth_state = {"net": None, "error": None}     # the neural depth layer (off by default)
+
+
+def apply_depth(frame):
+    """If the Depth layer is on: hand the clean picture to the background network and lay its newest result over it.
+    The network runs on its own thread, so this never waits. If it cannot start, the layer switches itself off."""
+    if not view["depth"]:
+        return frame
+    if depth_state["net"] is None:
+        depth_state["net"] = NeuralDepth()
+    net = depth_state["net"]
+    if not net.available:
+        depth_state["error"], view["depth"] = net.error, False
+        return frame
+    depth_state["error"] = None
+    net.submit(frame)
+    result = net.latest()
+    return depth_overlay(frame, result[0]) if result else frame
+
+
 def process(jpg, ts=None):
     """Apply the view flips and, if a target is armed, find it, aim, and draw. Returns (JPEG, found flag)."""
     now = time.time() if ts is None else ts
-    if not (view["mirror"] or view["vflip"] or tracker.armed):
+    if not (view["mirror"] or view["vflip"] or view["depth"] or tracker.armed):
         engage.update(now, False, False, False)
         return jpg, False                # nothing to change: the Pi's JPEG goes straight to the browser
     frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
     if view["mirror"] or view["vflip"]:
         frame = cv2.flip(frame, -1 if view["mirror"] and view["vflip"] else 1 if view["mirror"] else 0)
     found = False
+    face = tracker.find(frame) if tracker.armed else None     # find the target on the CLEAN picture, before any overlay
+    frame = apply_depth(frame)
     if tracker.armed:
-        face = tracker.find(frame)
         h, w = frame.shape[:2]
         if view["mask"] and tracker.debug_mask is not None:   # tint every pixel the color filter accepts
             hit = cv2.resize(tracker.debug_mask, (w, h), interpolation=cv2.INTER_NEAREST) > 0
@@ -142,6 +164,7 @@ def capture_loop():
                  "error": ctl["error"] or (aimer.gimbal.error if aimer else None),
                  "angles": ctl["angles"], "sign": aimer.sign if aimer else None,
                  "mode": aimer.mode if aimer else "map", "view": dict(view),
+                 "depth": depth_state["net"].stats() if depth_state["net"] else None, "depth_error": depth_state["error"],
                  "dropped": feed.dropped, "age_ms": round(age_ms), "cfg": dict(cfg),
                  "engage": {"state": engage.state, "armed": engage.armed, "auto_scan": engage.auto_scan,
                             "shots": engage.shots, "max_shots": engage.max_shots}}

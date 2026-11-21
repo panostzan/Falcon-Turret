@@ -8,3 +8,5 @@ esp/build_*/
 captures/
 # holds the hotspot password: copy wifi_config.example.h to wifi_config.h and fill it in
 esp/gimbal_wifi/wifi_config.h
+# downloaded neural-network models (large, re-downloadable)
+models/
