@@ -50,7 +50,7 @@ tracker = ColorTracker()
 # on the real turret, the other way pointed the wrong direction. The dashboard's Flip buttons change these live.
 DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
 view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False}   # flip the picture so it matches the real world (set from the dashboard)
-cfg = {"lead_ms": 0}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
+cfg = {"lead_ms": 0, "min_conf": 80}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
                                      # to about the measured camera-to-servo delay, using the dashboard slider)
 predictor = LeadPredictor()
 engage = Engagement()                 # SEARCH/ACQUIRE/TRACK/LOCK/COOLDOWN and the fire interlocks (simulated emitter)
@@ -100,6 +100,30 @@ def apply_depth(frame):
     return depth_overlay(frame, result[0]) if result else frame
 
 
+LIME, AMBER = (58, 226, 182), (0, 176, 255)     # BGR
+
+
+def draw_reticle(frame, cx, cy, fw, fh, conf, need):
+    """Corner-bracket reticle around the target with a confidence bar. Lime = sure enough to engage,
+    amber = not sure (the engagement logic will not lock or fire). The white tick is the required level."""
+    col = LIME if conf >= need else AMBER
+    x0, y0, x1, y1 = int(cx - fw / 2) - 6, int(cy - fh / 2) - 6, int(cx + fw / 2) + 6, int(cy + fh / 2) + 6
+    L = max(10, int(min(x1 - x0, y1 - y0) * 0.28))
+    for (px, py, dx, dy) in ((x0, y0, 1, 1), (x1, y0, -1, 1), (x0, y1, 1, -1), (x1, y1, -1, -1)):
+        cv2.line(frame, (px, py), (px + dx * L, py), col, 2)
+        cv2.line(frame, (px, py), (px, py + dy * L), col, 2)
+    mx, my = (x0 + x1) // 2, (y0 + y1) // 2
+    for a, b in (((mx, y0), (mx, y0 + 6)), ((mx, y1), (mx, y1 - 6)), ((x0, my), (x0 + 6, my)), ((x1, my), (x1 - 6, my))):
+        cv2.line(frame, a, b, col, 1)
+    cv2.circle(frame, (int(cx), int(cy)), 2, col, -1)
+    bw = max(40, x1 - x0)
+    by = min(frame.shape[0] - 10, y1 + 8)
+    cv2.rectangle(frame, (x0, by), (x0 + bw, by + 4), (40, 48, 30), -1)
+    cv2.rectangle(frame, (x0, by), (x0 + int(bw * conf), by + 4), col, -1)
+    cv2.line(frame, (x0 + int(bw * need), by - 3), (x0 + int(bw * need), by + 7), (255, 255, 255), 1)
+    cv2.putText(frame, f"{int(conf * 100)}%", (x0, max(14, y0 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1, cv2.LINE_AA)
+
+
 def process(jpg, ts=None):
     """Apply the view flips and, if a target is armed, find it, aim, and draw. Returns (JPEG, found flag)."""
     now = time.time() if ts is None else ts
@@ -125,7 +149,7 @@ def process(jpg, ts=None):
             trail.append((int(cx), int(cy)))
             trail_seen[0] = now
             if view["box"]:
-                cv2.rectangle(frame, (int(cx - fw / 2), int(cy - fh / 2)), (int(cx + fw / 2), int(cy + fh / 2)), (0, 255, 0), 2)
+                draw_reticle(frame, cx, cy, fw, fh, tracker.confidence, engage.min_confidence)
             ax, ay = cx, cy                    # the point to aim at: the target, or where it is heading
             if cfg["lead_ms"] > 0:
                 ax, ay = predictor.update(now, cx, cy, cfg["lead_ms"] / 1000, (w, h))
@@ -154,7 +178,8 @@ def process(jpg, ts=None):
         if ctl["aimer"]:
             ctl["aimer"].reset()
     tracking = ctl["tracking"] and tracker.armed
-    _, scan_goal = engage.update(now, tracking, found, info["settled"], info["speed"])
+    _, scan_goal = engage.update(now, tracking, found, info["settled"], info["speed"],
+                                 tracker.confidence if found else 0.0)
     if scan_goal and tracking and ctl["aimer"]:      # auto-scan: sweep while searching
         with ctl_lock:
             ctl["angles"] = ctl["aimer"].gimbal.move_to(*scan_goal)
@@ -188,6 +213,8 @@ def capture_loop():
                  "angles": ctl["angles"], "sign": aimer.sign if aimer else None,
                  "mode": aimer.mode if aimer else "map", "view": dict(view),
                  "source": f"webcam {CAMERA}" if CAMERA is not None else "Pi",
+                 "preset": tracker.preset, "confidence": round(tracker.confidence, 2) if found else 0.0,
+                 "conf_parts": tracker.conf_parts if found else {}, "min_confidence": engage.min_confidence,
                  "depth": depth_state["net"].stats() if depth_state["net"] else None, "depth_error": depth_state["error"],
                  "dropped": feed.dropped, "age_ms": round(age_ms), "cfg": dict(cfg),
                  "engage": {"state": engage.state, "armed": engage.armed, "auto_scan": engage.auto_scan,
@@ -329,6 +356,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(b"{}")
         if url.path == "/autoscan":
             engage.auto_scan = q.get("on", ["0"])[0] == "1"
+            return self._send(b"{}")
+        if url.path == "/cfg" and "min_conf" in q:
+            cfg["min_conf"] = max(30, min(100, int(float(q["min_conf"][0]))))
+            engage.min_confidence = cfg["min_conf"] / 100
             return self._send(b"{}")
         if url.path == "/cfg" and "lead_ms" in q:
             cfg["lead_ms"] = max(0, min(800, int(float(q["lead_ms"][0]))))

@@ -29,14 +29,22 @@
     <div class="panel">
       <h2>Target</h2>
       <div class="row">
-        <button id="p-teal">Teal</button>
-        <button id="p-blue">Blue</button>
-        <button id="p-clear">Clear</button>
+        <button id="p-teal" aria-pressed="false">Teal</button>
+        <button id="p-blue" aria-pressed="false">Blue</button>
+        <button id="p-clear" aria-pressed="false">None</button>
       </div>
       <div class="row" style="margin-top:12px">
         <button id="track" class="primary">Start tracking</button>
       </div>
+      <p class="hint" id="tsel" style="margin-top:8px">Target: none</p>
       <div class="err" id="err"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Confidence</h2>
+      <div class="meter" id="meter"><i id="meter-fill"></i><u id="meter-need"></u></div>
+      <div class="row" style="justify-content:space-between"><b id="conf-pct" class="big">–</b><small id="conf-note">No target</small></div>
+      <small id="conf-parts"></small>
     </div>
 
     <div class="panel">
@@ -67,6 +75,8 @@
           <button id="mirror" aria-pressed="true">Mirror</button>
           <button id="vflip" aria-pressed="false">Flip vertical</button>
         </div>
+        <label>Confidence needed to lock and fire: <b id="needv">80%</b>
+          <input id="need" type="range" min="50" max="100" step="5" value="80"></label>
         <label>Look ahead of a moving target: <b id="leadv">0 ms</b>
           <input id="lead" type="range" min="0" max="800" step="25" value="0"></label>
       </details>
@@ -161,6 +171,8 @@ $('flip-tilt').onclick = () => api.post('/flip?axis=tilt');
 $('center').onclick = () => api.post('/center');
 $('mirror').onclick = () => setView('mirror', !(S && S.view && S.view.mirror));
 $('vflip').onclick = () => setView('vflip', !(S && S.view && S.view.vflip));
+$('need').oninput = e => { $('needv').textContent = e.target.value + '%'; };
+$('need').onchange = e => api.post('/cfg?min_conf=' + e.target.value);
 $('lead').oninput = e => { $('leadv').textContent = e.target.value + ' ms'; };
 $('lead').onchange = e => api.post('/cfg?lead_ms=' + e.target.value);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { api.post('/track?on=0'); api.post('/arm?on=0'); } });
@@ -177,10 +189,21 @@ function render(s) {
   pressed($('m-map'), s.mode === 'map'); pressed($('m-follow'), s.mode === 'follow');
   pressed($('scan'), e.auto_scan);
 
+  pressed($('p-teal'), s.preset === 'teal'); pressed($('p-blue'), s.preset === 'blue'); pressed($('p-clear'), !s.armed);
+  $('tsel').textContent = 'Target: ' + ({ teal: 'teal', blue: 'blue', picked: 'picked from the picture' }[s.preset] || 'none');
+  const pct = Math.round((s.confidence || 0) * 100), need = Math.round((s.min_confidence || 0.8) * 100), sure = s.target && pct >= need;
+  $('meter-fill').style.width = pct + '%'; $('meter-need').style.left = need + '%';
+  $('meter').className = 'meter ' + (!s.target ? '' : sure ? 'sure' : 'unsure');
+  $('conf-pct').textContent = s.target ? pct + '%' : '–';
+  $('conf-note').textContent = !s.target ? 'No target' : sure ? 'Sure enough to engage' : 'Not sure: will not lock or fire';
+  const cp = s.conf_parts || {};
+  $('conf-parts').textContent = s.target ? `solid ${Math.round(cp.fill * 100)} · size ${Math.round(cp.size * 100)} · alone ${Math.round(cp.unique * 100)} · steady ${Math.round(cp.steady * 100)} · seen ${Math.round(cp.seen * 100)}` : '';
+  if (s.cfg && document.activeElement !== $('need')) { $('need').value = s.cfg.min_conf; $('needv').textContent = s.cfg.min_conf + '%'; }
   const badge = $('badge'); let text, cls = '';
   if (!s.connected) text = 'No picture';
   else if (!s.armed) text = 'Pick a target';
   else if (!s.target) { text = 'Searching'; cls = 'warn'; }
+  else if (!sure) { text = 'Not sure ' + pct + '%'; cls = 'warn'; }
   else if (e.state === 'LOCK' || e.state === 'COOLDOWN') { text = 'Locked'; cls = 'good'; }
   else { text = s.tracking ? 'Tracking' : 'Target found'; cls = 'good'; }
   badge.textContent = text; badge.className = 'badge ' + cls;

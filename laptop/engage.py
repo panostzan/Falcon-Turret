@@ -4,6 +4,7 @@ It decides only WHEN to fire; the aiming itself is aim.py. Interlocks, all of wh
   * the master ARM switch is on (it starts off, and arming resets the shot counter)
   * tracking is on and a target has been seen continuously
   * the gimbal has settled on the target for `lock_frames` frames, and the target is slow enough
+  * the tracker's confidence stays at or above `min_confidence` the whole time (a doubtful target never locks)
   * the lock has been held for `dwell_s` seconds
   * the cooldown since the last shot has passed, and fewer than `max_shots` have been fired since arming
 Firing goes through an emitter object; the default one is simulated (it only logs), because the real IR
@@ -26,11 +27,12 @@ class SimulatedEmitter:
 
 class Engagement:
     def __init__(self, emitter=None, acquire_frames=3, lock_frames=8, dwell_s=0.5, cooldown_s=1.5, lost_s=1.0,
-                 max_speed=300.0, max_shots=30, scan_range=(50.0, 130.0), scan_speed=25.0, scan_tilt=135.0):
+                 max_speed=300.0, max_shots=30, min_confidence=0.8, scan_range=(50.0, 130.0), scan_speed=25.0, scan_tilt=135.0):
         self.emitter = emitter or SimulatedEmitter()
         self.acquire_frames, self.lock_frames = acquire_frames, lock_frames
         self.dwell_s, self.cooldown_s, self.lost_s = dwell_s, cooldown_s, lost_s
         self.max_speed, self.max_shots = max_speed, max_shots
+        self.min_confidence = min_confidence    # below this the target counts as 'not sure': no lock, no shot
         self.scan_range, self.scan_speed, self.scan_tilt = scan_range, scan_speed, scan_tilt
         self.armed = False
         self.auto_scan = False
@@ -60,7 +62,7 @@ class Engagement:
             if on:
                 self.shots = 0
 
-    def update(self, ts, tracking, found, settled, speed=0.0):
+    def update(self, ts, tracking, found, settled, speed=0.0, confidence=1.0):
         """Call once per frame. Returns (fired, scan_goal): fired is True on the frame a shot is taken;
         scan_goal is a (pan, tilt) to sweep to while searching with auto_scan on, else None."""
         if not tracking:
@@ -87,7 +89,8 @@ class Engagement:
             if self._seen >= self.acquire_frames:
                 self._to("TRACK", ts)
         elif self.state in ("TRACK", "LOCK", "COOLDOWN"):
-            self._settled = self._settled + 1 if (found and settled) else 0
+            sure = confidence >= self.min_confidence
+            self._settled = self._settled + 1 if (found and settled and sure) else 0
             if self.state == "TRACK":
                 if self._settled >= self.lock_frames and speed <= self.max_speed:
                     self._lock_since = ts

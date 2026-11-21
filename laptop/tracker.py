@@ -16,6 +16,7 @@ MIN_FILL = 0.15        # mask pixels / box area; rejects very sparse scatter
 JOIN = 15              # fragments closer than about this many pixels (half size) are joined
 SMOOTH = 0.8           # weight of the newest box center (1 = no smoothing)
 LOST_AFTER = 10        # forget the last position after this many frames without a match
+SURE_FRAMES = 10       # frames in a row a target must be seen before confidence can reach 100%
 
 # OpenCV HSV: hue 0-180, so cyan/teal sits near 90 and pure blue near 120.
 PRESETS = {
@@ -31,6 +32,10 @@ class ColorTracker:
         self.last = None
         self.missed = 0
         self.debug_mask = None   # last mask at half size, for the dashboard's mask view
+        self.preset = None       # 'teal', 'blue', 'picked' (clicked in the picture) or None
+        self.confidence = 0.0    # 0..1 for the current match (0 when nothing is found)
+        self.conf_parts = {}     # the factors behind it, for the diagnostics
+        self.streak = 0          # consecutive frames the target has been found
 
     @property
     def armed(self):
@@ -41,9 +46,11 @@ class ColorTracker:
         lo, hi = PRESETS[name]
         self.lo, self.hi = np.array(lo), np.array(hi)
         self.ref_area, self.last, self.missed = None, None, 0
+        self.preset, self.confidence, self.streak = name, 0.0, 0
 
     def clear(self):
-        self.lo = self.hi = self.ref_area = self.last = self.debug_mask = None
+        self.lo = self.hi = self.ref_area = self.last = self.debug_mask = self.preset = None
+        self.confidence, self.streak, self.conf_parts = 0.0, 0, {}
 
     def _prep(self, frame):
         return cv2.cvtColor(cv2.GaussianBlur(cv2.resize(frame, None, fx=SCALE, fy=SCALE), (5, 5), 0),
@@ -96,6 +103,7 @@ class ColorTracker:
             self.clear()
             return False
         self.ref_area, self.last, self.missed = float(max(g[0] for g in hit)), None, 0
+        self.preset, self.confidence, self.streak = "picked", 0.0, 0
         return True
 
     def find(self, frame):
@@ -110,6 +118,7 @@ class ColorTracker:
                  and (self.ref_area is None or SIZE_RANGE[0] * self.ref_area <= a <= SIZE_RANGE[1] * self.ref_area)
                  and a / max(1, b[2] * b[3]) >= MIN_FILL]
         if not blobs:
+            self.confidence, self.streak = 0.0, 0
             self.missed += 1
             if self.missed > LOST_AFTER:
                 self.last = None
@@ -122,11 +131,31 @@ class ColorTracker:
             d = np.hypot(x + w / 2 - self.last[0], y + h / 2 - self.last[1])
             return area / (1 + (d / 40) ** 2)
 
-        area, (x, y, w, h) = max(blobs, key=score)
+        best = max(blobs, key=score)
+        area, (x, y, w, h) = best
         cx, cy = x + w / 2, y + h / 2
+        self._rate(best, [b for b in blobs if b is not best])
         if self.last is not None:   # light smoothing of the box center
             cx = SMOOTH * cx + (1 - SMOOTH) * self.last[0]
             cy = SMOOTH * cy + (1 - SMOOTH) * self.last[1]
         self.last, self.missed = (cx, cy), 0
         self.ref_area = area if self.ref_area is None else 0.9 * self.ref_area + 0.1 * area   # follow size changes
         return (cx / SCALE, cy / SCALE, w / SCALE, h / SCALE)
+
+    def _rate(self, best, others):
+        """Confidence 0..1 that `best` is really the target. Five checks, each 0..1:
+        fill (how solid the blob is), size (matches the learned size), unique (no similar rival blob),
+        steady (did not jump from the last position) and seen (found for several frames in a row)."""
+        area, (x, y, w, h) = best
+        fill = min(1.0, max(0.0, (area / max(1, w * h) - MIN_FILL) / (0.6 - MIN_FILL)))
+        size = 1.0 if self.ref_area is None else max(0.0, 1.0 - abs(area / self.ref_area - 1.0) / 0.6)
+        unique = 1.0 - max((a for a, _ in others), default=0) / max(1, area)
+        if self.last is None:
+            steady = 1.0
+        else:
+            steady = 1.0 / (1.0 + (np.hypot(x + w / 2 - self.last[0], y + h / 2 - self.last[1]) / 60.0) ** 2)
+        self.streak += 1
+        seen = min(1.0, self.streak / SURE_FRAMES)
+        self.conf_parts = {"fill": round(fill, 2), "size": round(size, 2), "unique": round(unique, 2),
+                           "steady": round(steady, 2), "seen": round(seen, 2)}
+        self.confidence = round(seen * (0.3 * fill + 0.25 * size + 0.25 * unique + 0.2 * steady), 3)
