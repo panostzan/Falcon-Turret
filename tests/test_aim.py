@@ -47,10 +47,6 @@ def in_range(g):
     return all(PAN_RANGE[0] <= p <= PAN_RANGE[1] and TILT_RANGE[0] <= t <= TILT_RANGE[1] for p, t in g.sent)
 
 
-class Recorder(SimGimbal):
-    pass
-
-
 def test_map():
     # same image position -> same angle, and it holds still (no counting up)
     g = SimGimbal(90)

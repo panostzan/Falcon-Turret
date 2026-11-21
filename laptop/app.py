@@ -18,8 +18,8 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from aim import Aimer              # noqa: E402
-from gimbal import Gimbal          # noqa: E402
-from receiver import jpeg_frames   # noqa: E402
+from gimbal import AsyncGimbal     # noqa: E402
+from receiver import FrameFeed       # noqa: E402
 from tracker import PRESETS, ColorTracker   # noqa: E402
 
 # "COM7" for USB serial, or e.g. "udp:192.168.137.50" for the Wi-Fi firmware. Override: set GIMBAL=udp:...
@@ -31,11 +31,10 @@ new_frame = threading.Condition()   # notified whenever `latest` changes
 latest = {"jpg": None, "seq": 0, "state": {"connected": False, "fps": 0, "kb": 0, "boot": BOOT}}
 
 tracker = ColorTracker()
-raw = {"w": 640, "h": 480}          # frame size, for mapping clicks
 # This turret's servos: tilt turns the opposite way from the picture's vertical axis. The dashboard's
 # Flip buttons change these live.
 DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
-view = {"mirror": True, "vflip": False}   # flip the picture so it matches the real world (set from the dashboard)
+view = {"mirror": True, "vflip": False, "mask": False}   # flip the picture so it matches the real world (set from the dashboard)
 ctl = {"tracking": False, "aimer": None, "error": None, "angles": None}
 ctl_lock = threading.Lock()
 
@@ -48,7 +47,7 @@ def set_tracking(on):
             return None
         try:
             if ctl["aimer"] is None:
-                ctl["aimer"] = Aimer(Gimbal(GIMBAL_PORT))
+                ctl["aimer"] = Aimer(AsyncGimbal(GIMBAL_PORT))
                 ctl["aimer"].sign.update(DEFAULT_SIGNS)
             ctl["angles"] = ctl["aimer"].gimbal.status()
             ctl["tracking"], ctl["error"] = True, None
@@ -68,7 +67,9 @@ def process(jpg):
     if tracker.armed:
         face = tracker.find(frame)
         h, w = frame.shape[:2]
-        raw.update(w=w, h=h)
+        if view["mask"] and tracker.debug_mask is not None:   # tint every pixel the color filter accepts
+            hit = cv2.resize(tracker.debug_mask, (w, h), interpolation=cv2.INTER_NEAREST) > 0
+            frame[hit] = (0.4 * frame[hit] + 0.6 * np.array((255, 0, 255))).astype(np.uint8)
         cv2.drawMarker(frame, (w // 2, h // 2), (255, 255, 255), cv2.MARKER_CROSS, 20, 1)
         if face:
             found = True
@@ -85,17 +86,28 @@ def process(jpg):
 
 
 def capture_loop():
-    arrivals, count = [], 0
-    for ts, jpg in jpeg_frames():
+    feed = FrameFeed()
+    arrivals, count, seq, last_frame = [], 0, -1, time.time()
+    while True:
+        item = feed.get(seq)
+        if item is None:                      # nothing from the Pi for a while
+            if time.time() - last_frame > 4:
+                latest["state"] = dict(latest["state"], connected=False, fps=0)
+            continue
+        seq, ts, jpg = item
+        last_frame = time.time()
+        age_ms = (last_frame - ts) * 1000     # how long the frame waited before we got to it
         jpg, found = process(jpg)
         arrivals = [a for a in arrivals + [ts] if ts - a < 3]
         fps = (len(arrivals) - 1) / (arrivals[-1] - arrivals[0]) if len(arrivals) > 1 else 0
         count += 1
         aimer = ctl["aimer"]
         state = {"connected": True, "fps": round(fps, 1), "frames": count, "kb": round(len(jpg) / 1024),
-                 "boot": BOOT, "tracking": ctl["tracking"], "target": found, "armed": tracker.armed, "error": ctl["error"],
+                 "boot": BOOT, "tracking": ctl["tracking"], "target": found, "armed": tracker.armed,
+                 "error": ctl["error"] or (aimer.gimbal.error if aimer else None),
                  "angles": ctl["angles"], "sign": aimer.sign if aimer else None,
-                 "mode": aimer.mode if aimer else "map", "view": dict(view)}
+                 "mode": aimer.mode if aimer else "map", "view": dict(view),
+                 "dropped": feed.dropped, "age_ms": round(age_ms)}
         with new_frame:
             latest.update(jpg=jpg, seq=count, state=state)
             new_frame.notify_all()

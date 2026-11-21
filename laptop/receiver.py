@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import struct
+import threading
 import time
 
 USER = "qnxuser"
@@ -60,6 +61,37 @@ def jpeg_frames(quality=QUALITY):
             proc.kill()
             proc.wait()
         time.sleep(1)   # brief backoff before reconnecting
+
+
+class FrameFeed:
+    """Reads the Pi's stream on its own thread and keeps only the NEWEST frame.
+
+    If the consumer is busy, older frames are dropped instead of piling up in the network buffer, so what
+    get() returns is always as fresh as possible. `dropped` counts frames that were never consumed.
+    """
+
+    def __init__(self, quality=QUALITY):
+        self._cv = threading.Condition()
+        self._latest, self._seq, self._consumed = None, 0, 0
+        self.dropped = 0
+        threading.Thread(target=self._run, args=(quality,), daemon=True).start()
+
+    def _run(self, quality):
+        for ts, jpg in jpeg_frames(quality):
+            with self._cv:
+                if self._seq != self._consumed:     # the previous frame was never picked up
+                    self.dropped += 1
+                self._seq += 1
+                self._latest = (ts, jpg)
+                self._cv.notify_all()
+
+    def get(self, last_seq, timeout=2.0):
+        """Block until a frame newer than last_seq exists; return (seq, arrival time, jpeg) or None."""
+        with self._cv:
+            if not self._cv.wait_for(lambda: self._seq != last_seq, timeout):
+                return None
+            self._consumed = self._seq
+            return (self._seq, *self._latest)
 
 
 if __name__ == "__main__":

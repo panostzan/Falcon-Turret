@@ -24,7 +24,8 @@ button.off{background:#30363d;color:var(--fg)}
    <div class="k">Gimbal (pan / tilt)</div><div class="v" id="ang">–</div></div>
   <div class="card"><div class="k">Picture orientation</div>
    <button id="vm" onclick="toggleView('mirror')">Mirror</button>
-   <button id="vv" class="off" onclick="toggleView('vflip')">Flip vertical</button></div>
+   <button id="vv" class="off" onclick="toggleView('vflip')">Flip vertical</button>
+   <button id="vk" class="off" onclick="toggleView('mask')">Show color match</button></div>
   <div class="card"><div class="k">Aiming mode</div>
    <button id="mmap" onclick="setMode('map')">Map (camera fixed)</button>
    <button id="mfol" class="off" onclick="setMode('follow')">Follow (camera on gimbal)</button></div>
@@ -51,7 +52,7 @@ v.onclick=async e=>{const r=v.getBoundingClientRect();
  $('err').textContent=res.ok===false?'Click directly on the bottle (that spot is a wall or too big).':''};
 const post=u=>fetch(u,{method:'POST'}).then(r=>r.json());
 async function toggle(){const r=await post('/track?on='+(tracking?0:1));$('err').textContent=r.error||''}
-let viewState={mirror:true,vflip:false};
+let viewState={mirror:true,vflip:false,mask:false};
 async function toggleView(k){await post('/view?key='+k+'&on='+(viewState[k]?0:1))}
 async function setMode(m){await post('/mode?name='+m)}
 const sgn=x=>x>0?'(+)':'(−)';
@@ -61,7 +62,7 @@ async function tick(){try{const s=await (await fetch('/state')).json();
  $('ang').textContent=s.angles?s.angles.join(' / '):'–';
  $('trk').textContent='Tracking: '+(s.tracking?'ON':'OFF');$('trk').className=s.tracking?'':'off';
  $('mmap').className=s.mode==='map'?'':'off';$('mfol').className=s.mode==='follow'?'':'off';
- if(s.view){viewState=s.view;$('vm').className=s.view.mirror?'':'off';$('vv').className=s.view.vflip?'':'off'}
+ if(s.view){viewState=s.view;$('vm').className=s.view.mirror?'':'off';$('vv').className=s.view.vflip?'':'off';$('vk').className=s.view.mask?'':'off'}
  if(s.sign){$('sp').textContent=sgn(s.sign.pan);$('stl').textContent=sgn(s.sign.tilt)}
  $('err').textContent=s.error||'';
  const st=$('st');st.textContent=!s.connected?'No camera':!s.armed?'LIVE: click a target':s.target?(s.tracking?'TRACKING':'LOCKED (gimbal off)'):'Target lost';

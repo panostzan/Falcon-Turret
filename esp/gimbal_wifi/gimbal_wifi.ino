@@ -20,6 +20,11 @@ size_t serialUsed = 0;
 bool serialOverflow = false;
 unsigned long lastWifiTry = 0;
 
+// Same pulse mapping as Servo.write(angle) for attach(pin, 500, 2400), but sent straight to the timer.
+void moveServo(Servo &servo, int angle) {
+  servo.writeMicroseconds(500 + (long)angle * (2400 - 500) / 180);
+}
+
 String status() {
   return "P" + String(panAngle) + " T" + String(tiltAngle);
 }
@@ -30,8 +35,8 @@ String runCommand(const char *cmd) {
   if (strcmp(cmd, "C") == 0) {
     panAngle = 90;
     tiltAngle = 135;
-    panServo.write(panAngle);
-    tiltServo.write(tiltAngle);
+    moveServo(panServo, panAngle);
+    moveServo(tiltServo, tiltAngle);
   } else if (strcmp(cmd, "S") == 0) {
     // status only; servos give no position feedback
   } else if ((cmd[0] == 'P' || cmd[0] == 'T') && n > 1) {
@@ -41,10 +46,10 @@ String runCommand(const char *cmd) {
     int angle = atoi(cmd + 1);
     if (cmd[0] == 'P') {
       panAngle = constrain(angle, 0, 180);
-      panServo.write(panAngle);
+      moveServo(panServo, panAngle);
     } else {
       tiltAngle = constrain(angle, 90, 180);
-      tiltServo.write(tiltAngle);
+      moveServo(tiltServo, tiltAngle);
     }
   } else {
     return "ERR unknown command";
@@ -65,8 +70,8 @@ void setup() {
   tiltServo.setPeriodHertz(50);
   panServo.attach(PAN_PIN, 500, 2400);
   tiltServo.attach(TILT_PIN, 500, 2400);
-  panServo.write(panAngle);
-  tiltServo.write(tiltAngle);
+  moveServo(panServo, panAngle);
+  moveServo(tiltServo, tiltAngle);
   connectWifi();
   udp.begin(UDP_PORT);
   Serial.println(status());

@@ -73,6 +73,35 @@ def test_udp():
     print("udp gimbal tests passed")
 
 
+def test_async():
+    """AsyncGimbal never blocks the caller, coalesces to the latest angle, and eventually delivers it."""
+    import time
+    from gimbal import AsyncGimbal
+
+    class SlowESP(FakeESP):
+        def write(self, data):
+            time.sleep(0.04)                      # like the real ESP: ~40 ms per move
+            super().write(data)
+
+    esp = SlowESP()
+    g = AsyncGimbal(link=esp)
+    t0 = time.perf_counter()
+    for i in range(30):                           # 30 rapid pan requests while the ESP is slow
+        g.move_to(pan=91 + i)
+    elapsed = (time.perf_counter() - t0) * 1000
+    assert elapsed < 30, f"move_to must not wait for the ESP ({elapsed:.0f} ms for 30 calls)"
+    assert g.pan == 120
+    time.sleep(0.5)
+    assert esp.pan == 120, f"ESP should end at the latest angle, got {esp.pan}"
+    assert len(esp.log) < 30, f"slow ESP should skip intermediate angles, got {len(esp.log)} commands"
+    g.move_to(pan=500, tilt=0)                    # clamped, like the sync driver
+    time.sleep(0.2)
+    assert (esp.pan, esp.tilt) == (180, 90) and g.error is None
+    assert g.center() == (90, 135)
+    g.close()
+    print("async gimbal tests passed")
+
+
 def test():
     esp = FakeESP()
     g = Gimbal(link=esp)
@@ -97,3 +126,4 @@ def test():
 if __name__ == "__main__":
     test()
     test_udp()
+    test_async()

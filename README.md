@@ -12,7 +12,7 @@ C270 -> Pi (QNX) --SSH/Wi-Fi--> laptop --USB serial (COM7) or UDP--> ESP32 -> pa
 ## Run
 1. Windows hotspot on (name/password in your wifi_config.h); Pi powered and joined; ESP32 plugged into the laptop (COM7).
 2. `python laptop/app.py`, then open http://localhost:8000.
-3. Click **Teal** (or click the target), then **Tracking: ON**.
+3. Click **Teal** (or click the target), then **Tracking: ON**. "Show color match" tints the pixels the filter accepts.
 
 Settings: `GIMBAL` env var picks the ESP link (`COM7` default, or `udp:192.168.137.50`); `PI_HOST` overrides the
 Pi address (normally found by its MAC address, because the hotspot changes its IP).
@@ -25,7 +25,17 @@ Pi address (normally found by its MAC address, because the hotspot changes its I
   `gimbal.py` ESP driver (serial or UDP); `app.py` + `dashboard.html` server and UI (mirror/flip, presets, modes).
 - `esp/gimbal_wifi/` firmware (USB serial + Wi-Fi UDP, same commands as the original `gimbal.ino`);
   copy `wifi_config.example.h` to `wifi_config.h`. `esp/wifi_diag/` is a Wi-Fi scan/diagnostic sketch.
-- `tests/` run with `python tests/test_aim.py` (also `test_tracker.py`, `test_gimbal.py`); no hardware needed.
+- `tests/` need no hardware: `test_aim.py`, `test_tracker.py`, `test_gimbal.py`, `test_feed.py`, `test_latency_tool.py`, and
+  `test_pipeline.py` (synthetic camera frames through flip -> tracker -> aim -> async gimbal -> simulated ESP).
+- `tools/latency_test.py` measures glass-to-glass camera latency (stop the server first; aim the camera at the screen).
+
+## Latency design
+- `receiver.FrameFeed` reads the Pi stream on its own thread and keeps only the newest frame (stale frames are dropped, not
+  queued). The dashboard shows how long each frame waited and how many were dropped.
+- `gimbal.AsyncGimbal` sends servo commands from a background thread (latest angle per axis wins), so the ESP's ~40 ms per
+  move never blocks the video loop. Measured laptop processing (decode, flip, track, aim, encode): about 3 ms per frame.
+- Open question: every P/T command takes exactly 40 ms for the ESP to answer (status takes 5 ms), even sending the pulse
+  width directly. Not yet explained; it caps the ESP at about 25 moves per second.
 
 ## Hardware notes
 - ESP32 commands: `P<0-180>` pan (GPIO 19), `T<90-180>` tilt (GPIO 18), `C` center (90/135), `S` status. Servos need their

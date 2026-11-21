@@ -8,6 +8,7 @@ Servos have no position feedback, so the angles are the last values commanded.
 """
 import re
 import socket
+import threading
 import time
 
 import serial
@@ -108,6 +109,67 @@ class Gimbal:
 
     def __exit__(self, *exc):
         self.close()
+
+
+class AsyncGimbal:
+    """Non-blocking wrapper: move_to() returns at once and a background thread talks to the ESP.
+
+    The ESP takes tens of milliseconds to answer a move; waiting for it inside the video loop would delay
+    every frame. Here only the latest wanted angle per axis is kept, so a slow ESP just skips intermediate
+    angles instead of queueing them. `pan`/`tilt` are the angles last requested; `error` holds the last
+    communication failure (or None).
+    """
+
+    def __init__(self, port=None, **kwargs):
+        self._g = Gimbal(port, **kwargs)
+        self.pan, self.tilt = self._g.pan, self._g.tilt
+        self.error = None
+        self._want = {"P": None, "T": None}
+        self._lock = threading.Lock()      # guards _want
+        self._io = threading.Lock()        # one conversation with the ESP at a time
+        self._wake = threading.Event()
+        self._stop = False
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def move_to(self, pan=None, tilt=None):
+        with self._lock:
+            if pan is not None:
+                self.pan = self._want["P"] = _clamp(pan, *PAN_RANGE)
+            if tilt is not None:
+                self.tilt = self._want["T"] = _clamp(tilt, *TILT_RANGE)
+        self._wake.set()
+        return self.pan, self.tilt
+
+    def _run(self):
+        while not self._stop:
+            self._wake.wait(0.5)
+            self._wake.clear()
+            with self._lock:
+                want, self._want = self._want, {"P": None, "T": None}
+            for axis, value in want.items():
+                if value is not None:
+                    try:
+                        with self._io:
+                            self._g._send(f"{axis}{value}")
+                        self.error = None
+                    except Exception as e:
+                        self.error = str(e)
+
+    def status(self):
+        with self._io:
+            return self._g.status()
+
+    def center(self):
+        with self._lock:
+            self._want = {"P": None, "T": None}
+        with self._io:
+            self.pan, self.tilt = self._g.center()
+        return self.pan, self.tilt
+
+    def close(self):
+        self._stop = True
+        self._wake.set()
+        self._g.close()
 
 
 if __name__ == "__main__":
