@@ -89,6 +89,8 @@ class DepthSmoother:
         self.src = None                           # thumbnail of the picture `target` was computed from
         self.t_new = None
         self.interval = 0.15                      # running estimate of the time between results
+        self.fade = 0.15                          # how long the current fade takes (shortened when things move)
+        self.motion = 0.0                         # 0 still .. 1 fast-changing picture, measured between results
         self.done = None
 
     def update(self, depth, done, thumb, now):
@@ -98,10 +100,16 @@ class DepthSmoother:
         if self.target is None:
             self.target = self.shown_from = depth.copy()
         else:
+            # How much did the picture change since the previous result? When it changed a lot (things are moving), old
+            # depth is stale: skip the averaging and fade fast, so the overlay follows the movement instead of ghosting.
+            if self.src is not None and thumb is not None:
+                self.motion = smoothstep((float(np.abs(thumb - self.src).mean()) - 2.0) / 8.0)
             self.shown_from = self.current(now, thumb)            # start the fade from exactly what is on screen now
-            self.target = self.KEEP * self.target + (1 - self.KEEP) * depth
+            keep = self.KEEP * (1.0 - self.motion)
+            self.target = keep * self.target + (1 - keep) * depth
             if self.done is not None:
                 self.interval = min(0.4, max(0.08, 0.7 * self.interval + 0.3 * (done - self.done)))
+            self.fade = self.interval * (1.0 - 0.8 * self.motion)
         self.src, self.done, self.t_new = thumb, done, now
 
     def _shift(self, thumb):
@@ -119,7 +127,7 @@ class DepthSmoother:
         """The depth map to show right now (the fade, then the motion compensation)."""
         if self.target is None:
             return None
-        k = smoothstep((now - self.t_new) / self.interval)
+        k = smoothstep((now - self.t_new) / self.fade)
         d = self.shown_from * (1 - k) + self.target * k if k < 1.0 else self.target
         dx, dy = self._shift(thumb)
         if dx or dy:

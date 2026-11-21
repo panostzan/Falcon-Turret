@@ -49,7 +49,7 @@ tracker = ColorTracker()
 # This turret's servo directions (+1 = angle grows as the target goes right / down in the picture). Tilt is -1: tested
 # on the real turret, the other way pointed the wrong direction. The dashboard's Flip buttons change these live.
 DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
-view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False, "smooth": True}   # flip the picture so it matches the real world (set from the dashboard)
+view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False, "smooth": True, "depthcheck": False}   # flip the picture so it matches the real world (set from the dashboard)
 cfg = {"lead_ms": 0, "min_conf": 80}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
                                      # to about the measured camera-to-servo delay, using the dashboard slider)
 predictor = LeadPredictor()
@@ -84,28 +84,34 @@ trail = deque(maxlen=45)                       # recent target positions, for th
 trail_seen = [0.0]                             # when the target was last seen (the trail clears after a second without it)
 
 
-def apply_depth(frame):
-    """If the Depth layer is on: hand the clean picture to the background network and lay its newest result over it.
-    The network runs on its own thread, so this never waits. If it cannot start, the layer switches itself off."""
-    if not view["depth"]:
-        return frame
+def depth_map(frame):
+    """If the Depth layer or the depth check is on: hand the clean picture to the background network and return its
+    newest result (smoothed and motion-compensated unless smoothing is off), or None. The network runs on its own
+    thread, so this never waits. If it cannot start, both switch themselves off."""
+    if not (view["depth"] or view["depthcheck"]):
+        return None
     if depth_state["net"] is None:
         depth_state["net"] = NeuralDepth()
     net = depth_state["net"]
     if not net.available:
-        depth_state["error"], view["depth"] = net.error, False
-        return frame
+        depth_state["error"], view["depth"], view["depthcheck"] = net.error, False, False
+        return None
     depth_state["error"] = None
     net.submit(frame)
     if not view["smooth"]:                                      # raw: the newest result as it is (steps at the network's rate)
         result = net.latest()
-        return depth_overlay(frame, result[0]) if result else frame
+        return result[0] if result else None
     full = net.latest_full()
     if not full:
-        return frame
+        return None
     sm, now, thumb = depth_state["smoother"], time.time(), thumbnail(frame)
     sm.update(full[0], full[1], full[2], now)
-    return depth_overlay(frame, sm.current(now, thumb))
+    return sm.current(now, thumb)
+
+
+def apply_depth(frame, dmap):
+    """Lay the depth heatmap over the picture when the Depth layer is on."""
+    return depth_overlay(frame, dmap) if (view["depth"] and dmap is not None) else frame
 
 
 LIME, AMBER = (58, 226, 182), (0, 176, 255)     # BGR
@@ -163,7 +169,7 @@ def draw_ghost(frame, lost):
 def process(jpg, ts=None):
     """Apply the view flips and, if a target is armed, find it, aim, and draw. Returns (JPEG, found flag)."""
     now = time.time() if ts is None else ts
-    if not (view["mirror"] or view["vflip"] or view["depth"] or tracker.armed):
+    if not (view["mirror"] or view["vflip"] or view["depth"] or view["depthcheck"] or tracker.armed):
         engage.update(now, False, False, False)
         return jpg, False                # nothing to change: the Pi's JPEG goes straight to the browser
     frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
@@ -171,7 +177,10 @@ def process(jpg, ts=None):
         frame = cv2.flip(frame, -1 if view["mirror"] and view["vflip"] else 1 if view["mirror"] else 0)
     found = False
     face = tracker.find(frame) if tracker.armed else None     # find the target on the CLEAN picture, before any overlay
-    frame = apply_depth(frame)
+    dmap = depth_map(frame)                          # also None when neither the Depth layer nor the depth check is on
+    if face and dmap is not None:
+        tracker.check_depth(dmap)
+    frame = apply_depth(frame, dmap)
     if tracker.armed:
         h, w = frame.shape[:2]
         if view["mask"] and tracker.debug_mask is not None:   # tint every pixel the color filter accepts

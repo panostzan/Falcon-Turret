@@ -85,6 +85,7 @@
         <div class="row">
           <button id="mirror" aria-pressed="true">Mirror</button>
           <button id="vflip" aria-pressed="false">Flip vertical</button>
+          <button id="dcheck" aria-pressed="false" title="Lowers confidence when the depth disagrees with the match. Runs the depth network.">Depth check</button>
           <button id="smooth" aria-pressed="true" title="Glides between depth results, averages flicker, follows camera motion">Smooth depth</button>
         </div>
         <label>Confidence needed to lock and fire: <b id="needv">80%</b>
@@ -182,6 +183,7 @@ $('flip-pan').onclick = () => api.post('/flip?axis=pan');
 $('flip-tilt').onclick = () => api.post('/flip?axis=tilt');
 $('center').onclick = () => api.post('/center');
 $('mirror').onclick = () => setView('mirror', !(S && S.view && S.view.mirror));
+$('dcheck').onclick = () => setView('depthcheck', !(S && S.view && S.view.depthcheck));
 $('smooth').onclick = () => setView('smooth', !(S && S.view && S.view.smooth));
 $('vflip').onclick = () => setView('vflip', !(S && S.view && S.view.vflip));
 $('need').oninput = e => { $('needv').textContent = e.target.value + '%'; };
@@ -198,7 +200,7 @@ function render(s) {
   if (!s) return;
   const v = s.view || {}, e = s.engage || {};
   for (const l of LAYERS) pressed($('layer-' + l.key), v[l.key]);
-  pressed($('mirror'), v.mirror); pressed($('vflip'), v.vflip); pressed($('smooth'), v.smooth);
+  pressed($('mirror'), v.mirror); pressed($('vflip'), v.vflip); pressed($('smooth'), v.smooth); pressed($('dcheck'), v.depthcheck);
   pressed($('m-map'), s.mode === 'map'); pressed($('m-follow'), s.mode === 'follow');
   pressed($('scan'), e.auto_scan);
 
@@ -210,7 +212,7 @@ function render(s) {
   $('conf-pct').textContent = s.target ? pct + '%' : '–';
   $('conf-note').textContent = !s.target ? 'No target' : sure ? 'Sure enough to engage' : 'Not sure: will not lock or fire';
   const cp = s.conf_parts || {};
-  $('conf-parts').textContent = s.target ? `solid ${Math.round(cp.fill * 100)} · size ${Math.round(cp.size * 100)} · alone ${Math.round(cp.unique * 100)} · steady ${Math.round(cp.steady * 100)} · seen ${Math.round(cp.seen * 100)}` : '';
+  $('conf-parts').textContent = s.target ? `solid ${Math.round(cp.fill * 100)} · size ${Math.round(cp.size * 100)} · alone ${Math.round(cp.unique * 100)} · steady ${Math.round(cp.steady * 100)} · seen ${Math.round(cp.seen * 100)}` + (cp.depth != null ? ` · depth ${Math.round(cp.depth * 100)}` : '') : '';
   if (s.cfg && document.activeElement !== $('need')) { $('need').value = s.cfg.min_conf; $('needv').textContent = s.cfg.min_conf + '%'; }
   const lost = s.lost, P = s.perception, e2 = s.engage || {};
   const showBox = s.armed && P && P !== 'TRACKING';

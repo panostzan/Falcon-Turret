@@ -39,6 +39,16 @@ def test():
     assert (steps >= -1e-6).all() and steps.max() < 0.2, f"jumped: {steps.max():.2f}"
     assert levels[-1] > 0.4, "it must actually arrive"      # target is an average with the older map, so < 1 is expected
 
+    # 1b. when the picture is changing fast (things moving), the new depth shows up much sooner than when it is still
+    def reach(thumb_new):
+        sm = depth_nn.DepthSmoother()
+        sm.update(a, 1.0, scene_thumb(), 10.0)
+        sm.update(b, 1.15, thumb_new, 10.15)
+        return float(sm.current(10.15 + 0.04, thumb_new).mean())
+    still_level = reach(scene_thumb())
+    moving_level = reach(np.roll(scene_thumb(), 20, axis=1) * 0.4 + 90)     # a very different picture
+    assert moving_level > still_level + 0.2, (still_level, moving_level)
+
     # 2. flicker: noisy maps every 0.15 s, shown at 15 fps. Smoothed output varies much less from frame to frame
     def run(smooth):
         sm, th, prev, diffs, t = depth_nn.DepthSmoother(), scene_thumb(), None, [], 0.0

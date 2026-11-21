@@ -16,6 +16,8 @@ MIN_FILL = 0.15        # mask pixels / box area; rejects very sparse scatter
 JOIN = 15              # fragments closer than about this many pixels (half size) are joined
 SMOOTH = 0.8           # weight of the newest box center (1 = no smoothing)
 LOST_AFTER = 10        # forget the last position after this many frames without a match
+DEPTH_BAND = 0.12       # depth values (0..1) within this of the target's median count as 'the same depth'
+DEPTH_JUMP = 0.20       # a median this far from the followed target's depth halves the depth score
 SURE_FRAMES = 10       # frames in a row a target must be seen before confidence can reach 100%
 
 # OpenCV HSV: hue 0-180, so cyan/teal sits near 90 and pure blue near 120.
@@ -36,6 +38,8 @@ class ColorTracker:
         self.confidence = 0.0    # 0..1 for the current match (0 when nothing is found)
         self.conf_parts = {}     # the factors behind it, for the diagnostics
         self.streak = 0          # consecutive frames the target has been found
+        self.blob = None         # (x, y, w, h) of the matched group at half size, for the depth check
+        self.depth_ref = None    # depth of the target we have been following (0..1, relative)
 
     @property
     def armed(self):
@@ -46,11 +50,11 @@ class ColorTracker:
         lo, hi = PRESETS[name]
         self.lo, self.hi = np.array(lo), np.array(hi)
         self.ref_area, self.last, self.missed = None, None, 0
-        self.preset, self.confidence, self.streak = name, 0.0, 0
+        self.preset, self.confidence, self.streak, self.depth_ref = name, 0.0, 0, None
 
     def clear(self):
         self.lo = self.hi = self.ref_area = self.last = self.debug_mask = self.preset = None
-        self.confidence, self.streak, self.conf_parts = 0.0, 0, {}
+        self.confidence, self.streak, self.conf_parts, self.depth_ref, self.blob = 0.0, 0, {}, None, None
 
     def _prep(self, frame):
         return cv2.cvtColor(cv2.GaussianBlur(cv2.resize(frame, None, fx=SCALE, fy=SCALE), (5, 5), 0),
@@ -103,7 +107,7 @@ class ColorTracker:
             self.clear()
             return False
         self.ref_area, self.last, self.missed = float(max(g[0] for g in hit)), None, 0
-        self.preset, self.confidence, self.streak = "picked", 0.0, 0
+        self.preset, self.confidence, self.streak, self.depth_ref = "picked", 0.0, 0, None
         return True
 
     def find(self, frame):
@@ -118,7 +122,7 @@ class ColorTracker:
                  and (self.ref_area is None or SIZE_RANGE[0] * self.ref_area <= a <= SIZE_RANGE[1] * self.ref_area)
                  and a / max(1, b[2] * b[3]) >= MIN_FILL]
         if not blobs:
-            self.confidence, self.streak = 0.0, 0
+            self.confidence, self.streak, self.blob = 0.0, 0, None
             self.missed += 1
             if self.missed > LOST_AFTER:
                 self.last = None
@@ -134,6 +138,7 @@ class ColorTracker:
         best = max(blobs, key=score)
         area, (x, y, w, h) = best
         cx, cy = x + w / 2, y + h / 2
+        self.blob = (x, y, w, h)
         self._rate(best, [b for b in blobs if b is not best])
         if self.last is not None:   # light smoothing of the box center
             cx = SMOOTH * cx + (1 - SMOOTH) * self.last[0]
@@ -159,6 +164,29 @@ class ColorTracker:
         self.conf_parts = {"fill": round(fill, 2), "size": round(size, 2), "unique": round(unique, 2),
                            "steady": round(steady, 2), "seen": round(seen, 2)}
         self.confidence = round(seen * (0.3 * fill + 0.25 * size + 0.25 * unique + 0.2 * steady), 3)
+
+    def check_depth(self, depth01):
+        """Lower the confidence if the depth map disagrees with the match. `depth01` is the relative depth (0 far,
+        1 near), aligned with the picture the tracker just searched. Uses only the target's own color pixels:
+          consistent: the share of them at about one depth (a box spanning a near and a far object scores low)
+          steady: how close their median depth is to the depth of the target followed so far (a jump to another
+                  object scores low).
+        Confidence is multiplied by 0.5 + 0.5 * consistent * steady. Does nothing without a match or a depth map."""
+        if self.blob is None or self.confidence <= 0 or self.debug_mask is None or depth01 is None:
+            return
+        x, y, w, h = self.blob
+        d = cv2.resize(depth01, (self.debug_mask.shape[1], self.debug_mask.shape[0]), interpolation=cv2.INTER_LINEAR)
+        sel = d[y:y + h, x:x + w][self.debug_mask[y:y + h, x:x + w] > 0]
+        if sel.size < 30:
+            return
+        med = float(np.median(sel))
+        consistent = float(np.mean(np.abs(sel - med) <= DEPTH_BAND))
+        steady = 1.0 if self.depth_ref is None else 1.0 / (1.0 + (abs(med - self.depth_ref) / DEPTH_JUMP) ** 4)
+        score = consistent * steady
+        self.confidence = round(self.confidence * (0.5 + 0.5 * score), 3)
+        self.conf_parts.update(depth=round(score, 2), depth_consistent=round(consistent, 2), depth_steady=round(steady, 2))
+        if self.depth_ref is None or self.confidence >= 0.6:      # learn the target's depth only from matches we trust
+            self.depth_ref = med if self.depth_ref is None else 0.8 * self.depth_ref + 0.2 * med
 
 
 class LastSeen:
