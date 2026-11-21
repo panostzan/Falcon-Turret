@@ -2,7 +2,7 @@
 
 Run:  python tools\\relative_depth.py            (cameras 1 and 2, as listed by the stereo module's `check` command)
       python tools\\relative_depth.py --left 2 --right 1
-Keys: Q / Esc quit,  Space freeze / unfreeze,  S save a snapshot to captures/,  + / - change the matching range.
+Keys: Q / Esc quit,  Space freeze,  W swap left/right (if near things look cool),  S snapshot,  + / - matching range.
 
 This works for a rig that is mounted rigidly, side by side and level (vertical shift under about 2 px). It does plain
 block matching (OpenCV SGBM) on the raw pictures, so it needs no alignment step. If the cameras are swapped it notices
@@ -99,6 +99,9 @@ def main():
                 break
             if key == ord(" "):
                 frozen = not frozen
+            elif key == ord("w"):                              # manual override if the automatic left/right guess is wrong
+                swap, order_known = not swap, True
+                print("cameras swapped" if swap else "cameras in the given order", flush=True)
             elif key == ord("s"):
                 os.makedirs("captures", exist_ok=True)
                 path = os.path.join("captures", time.strftime("relative_depth_%H%M%S.png"))
