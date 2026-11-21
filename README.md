@@ -32,6 +32,13 @@ Pi address (normally found by its MAC address, because the hotspot changes its I
   async gimbal -> simulated ESP, including the state machine). Run them all: `python tests/run_all.py`.
 - `tools/latency_test.py` measures glass-to-glass camera latency (stop the server first; aim the camera at the screen).
 
+## ToF distance sensor (VL53L0X / VL53L1X)
+Wiring: VIN -> 3V3, GND -> GND, SDA -> GPIO 23, SCL -> GPIO 22 (leave XSHUT/GPIO1 open; avoid GPIO 12, a boot-strapping pin).
+`esp/gimbal_wifi/tof.h` auto-detects the model and reads it without ever blocking the servo code; no sensor means the
+firmware behaves as before. Commands: `R` -> `R<mm>` (`R-1` = none), `I` -> sensor model. `esp/tof_probe` is a read-only
+wiring check; `python tools/tof_monitor.py` shows a live reading. The sensor is static for now (not on the gimbal), so
+distance is displayed only; "target confirmed" logic comes once it rides on the bracket.
+
 ## Mission control and telemetry
 `laptop/engage.py` is the engagement state machine: IDLE -> SEARCH -> ACQUIRE -> TRACK -> LOCK -> (fire) -> COOLDOWN.
 Fire interlocks, all required: master **ARM** on (starts off; switching tracking off disarms), tracking on, target seen

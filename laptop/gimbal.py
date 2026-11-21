@@ -90,6 +90,25 @@ class Gimbal:
     def center(self):
         return self._send("C")
 
+    def _query(self, cmd, pattern):
+        """Send a non-movement command whose reply is not a position; returns the regex match."""
+        self.link.write(cmd.encode() + b"\n")
+        line = self.link.readline().decode(errors="replace").strip()
+        m = re.fullmatch(pattern, line)
+        if not m:
+            raise GimbalError(f"{cmd!r}: unexpected reply {line!r}")
+        return m
+
+    def distance_mm(self):
+        """Latest ToF distance in millimetres, or None when there is no sensor or no valid reading."""
+        mm = int(self._query("R", r"R(-?\d+)")[1])
+        return None if mm < 0 else mm
+
+    def sensor_model(self):
+        """'VL53L0X' / 'VL53L1X', or None when no distance sensor was found."""
+        name = self._query("I", r"I (\S+)")[1]
+        return None if name == "none" else name
+
     def move_to(self, pan=None, tilt=None):
         """Absolute move. Sends only the axes that actually change; angles are clamped to safe ranges."""
         if pan is not None and (p := _clamp(pan, *PAN_RANGE)) != self.pan:
@@ -162,6 +181,10 @@ class AsyncGimbal:
     def status(self):
         with self._io:
             return self._g.status()
+
+    def distance_mm(self):
+        with self._io:
+            return self._g.distance_mm()
 
     def center(self):
         with self._lock:

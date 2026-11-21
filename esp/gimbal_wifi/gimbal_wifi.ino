@@ -2,12 +2,14 @@
 // (port 4210) as well as over USB serial. Replies go back to whoever sent the command.
 //
 // Commands (one per packet / line):  P<0-180> pan   T<90-180> tilt   C center   S status
-// Reply: "P<pan> T<tilt>" or "ERR ...".
+//                                    R distance in mm ("R-1" = no sensor / no reading)   I sensor model
+// Reply: "P<pan> T<tilt>" (or "R<mm>", "I <model>") or "ERR ...".
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <ESP32Servo.h>
 #include "wifi_config.h"
+#include "tof.h"   // optional VL53 distance sensor on I2C (SDA 23, SCL 22)
 
 const uint16_t UDP_PORT = 4210;
 const int PAN_PIN = 19, TILT_PIN = 18;
@@ -51,6 +53,10 @@ String runCommand(const char *cmd) {
       tiltAngle = constrain(angle, 90, 180);
       moveServo(tiltServo, tiltAngle);
     }
+  } else if (strcmp(cmd, "R") == 0) {
+    return "R" + String(tofDistance());
+  } else if (strcmp(cmd, "I") == 0) {
+    return String("I ") + tofName();
   } else {
     return "ERR unknown command";
   }
@@ -72,6 +78,7 @@ void setup() {
   tiltServo.attach(TILT_PIN, 500, 2400);
   moveServo(panServo, panAngle);
   moveServo(tiltServo, tiltAngle);
+  tofBegin();   // after the servos: a missing sensor cannot affect them
   connectWifi();
   udp.begin(UDP_PORT);
   Serial.println(status());
@@ -123,6 +130,7 @@ void loop() {
     WiFi.disconnect();
     connectWifi();
   }
+  tofPoll();
   handleUdp();
   handleSerial();
 }
