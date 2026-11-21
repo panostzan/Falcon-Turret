@@ -27,6 +27,7 @@ def run(cx, cy, mirror=True, frames=25):
     esp = FakeESP()
     gimbal = AsyncGimbal(link=esp)
     app.tracker.use_preset("teal")
+    app.predictor.reset()
     app.ctl.update(aimer=Aimer(gimbal), tracking=True, error=None)
     app.ctl["aimer"].sign.update(app.DEFAULT_SIGNS)
     app.view.update(mirror=mirror, vflip=False, mask=False)
@@ -41,7 +42,37 @@ def run(cx, cy, mirror=True, frames=25):
     return esp.pan, esp.tilt, sum(times[5:]) / len(times[5:]), out
 
 
+def run_moving(lead_ms, frames=40):
+    """A teal box sliding right at 150 px/s (15 fps); returns the final pan and the box's last x."""
+    esp = FakeESP()
+    gimbal = AsyncGimbal(link=esp)
+    app.tracker.use_preset("teal")
+    app.predictor.reset()
+    app.ctl.update(aimer=Aimer(gimbal), tracking=True, error=None)
+    app.ctl["aimer"].sign.update(app.DEFAULT_SIGNS)
+    app.view.update(mirror=False, vflip=False, mask=False)
+    app.cfg["lead_ms"] = lead_ms
+    for i in range(frames):
+        app.process(frame_with_box(150 + 10 * i, 240), i / 15)     # frame i is stamped i/15 s
+    time.sleep(0.4)
+    gimbal.close()
+    return esp.pan, 150 + 10 * (frames - 1)
+
+
+def test_moving():
+    pan_plain, box_x = run_moving(0)
+    pan_lead, _ = run_moving(250)
+    app.cfg["lead_ms"] = 250
+    plain_x = 320 + (pan_plain - 90) / 90 * 320            # where the aim was pointing, in pixels
+    lead_x = 320 + (pan_lead - 90) / 90 * 320
+    assert abs(plain_x - box_x) < 45, f"without lead the aim should be near the box ({plain_x:.0f} vs {box_x})"
+    assert lead_x > plain_x + 20, f"with lead the aim should be ahead of the box: {lead_x:.0f} vs {plain_x:.0f}"
+    assert lead_x < plain_x + 60, f"the lead should be modest (150 px/s * 0.25 s = 38 px), got {lead_x - plain_x:.0f}"
+    print(f"moving target: aim {plain_x:.0f} px without lead, {lead_x:.0f} px with lead (box at {box_x})")
+
+
 def test():
+    test_moving()
     # mirrored picture: a box at source x=480 appears at x=160 (left of center) -> pan below 90
     pan, tilt, ms, _ = run(480, 360)
     assert abs(pan - 45) <= 3 and abs(tilt - 112) <= 3, (pan, tilt)

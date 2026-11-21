@@ -26,6 +26,10 @@ button.off{background:#30363d;color:var(--fg)}
    <button id="vm" onclick="toggleView('mirror')">Mirror</button>
    <button id="vv" class="off" onclick="toggleView('vflip')">Flip vertical</button>
    <button id="vk" class="off" onclick="toggleView('mask')">Show color match</button></div>
+  <div class="card"><div class="k">Lead: aim ahead of a moving target</div>
+   <input id="lead" type="range" min="0" max="800" step="25" value="250" style="width:100%"
+    oninput="$('leadv').textContent=this.value+' ms'" onchange="post('/cfg?lead_ms='+this.value)">
+   <div class="v" id="leadv">250 ms</div></div>
   <div class="card"><div class="k">Aiming mode</div>
    <button id="mmap" onclick="setMode('map')">Map (camera fixed)</button>
    <button id="mfol" class="off" onclick="setMode('follow')">Follow (camera on gimbal)</button></div>
@@ -63,6 +67,7 @@ async function tick(){try{const s=await (await fetch('/state')).json();
  $('trk').textContent='Tracking: '+(s.tracking?'ON':'OFF');$('trk').className=s.tracking?'':'off';
  $('mmap').className=s.mode==='map'?'':'off';$('mfol').className=s.mode==='follow'?'':'off';
  if(s.view){viewState=s.view;$('vm').className=s.view.mirror?'':'off';$('vv').className=s.view.vflip?'':'off';$('vk').className=s.view.mask?'':'off'}
+ if(s.cfg&&document.activeElement!==$('lead')){$('lead').value=s.cfg.lead_ms;$('leadv').textContent=s.cfg.lead_ms+' ms'}
  if(s.sign){$('sp').textContent=sgn(s.sign.pan);$('stl').textContent=sgn(s.sign.tilt)}
  $('err').textContent=s.error||'';
  const st=$('st');st.textContent=!s.connected?'No camera':!s.armed?'LIVE: click a target':s.target?(s.tracking?'TRACKING':'LOCKED (gimbal off)'):'Target lost';

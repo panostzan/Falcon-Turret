@@ -29,6 +29,13 @@ Pi address (normally found by its MAC address, because the hotspot changes its I
   `test_pipeline.py` (synthetic camera frames through flip -> tracker -> aim -> async gimbal -> simulated ESP).
 - `tools/latency_test.py` measures glass-to-glass camera latency (stop the server first; aim the camera at the screen).
 
+## Motion prediction
+`laptop/predict.py` keeps a smoothed position and velocity for the target (alpha-beta filter) and the turret aims
+`lead_ms` ahead of it (default 250 ms, about the camera-to-servo delay; slider on the dashboard; 0 turns it off). A yellow
+dot shows the aim point. In simulation (target seen 250 ms late, 15 fps, noise) the aim error falls from 23 to 3 px at
+constant speed, 29 to 10 px for stop-and-go, and 84 to 60 px for a fast swing; a still target does not jitter more.
+The true delay has not been measured on the hardware yet: use `tools/latency_test.py`, then set the slider to match.
+
 ## Latency design
 - `receiver.FrameFeed` reads the Pi stream on its own thread and keeps only the newest frame (stale frames are dropped, not
   queued). The dashboard shows how long each frame waited and how many were dropped.

@@ -19,6 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from aim import Aimer              # noqa: E402
 from gimbal import AsyncGimbal     # noqa: E402
+from predict import LeadPredictor  # noqa: E402
 from receiver import FrameFeed       # noqa: E402
 from tracker import PRESETS, ColorTracker   # noqa: E402
 
@@ -35,6 +36,8 @@ tracker = ColorTracker()
 # Flip buttons change these live.
 DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
 view = {"mirror": True, "vflip": False, "mask": False}   # flip the picture so it matches the real world (set from the dashboard)
+cfg = {"lead_ms": 250}               # aim this far ahead of a moving target (about the camera-to-servo delay)
+predictor = LeadPredictor()
 ctl = {"tracking": False, "aimer": None, "error": None, "angles": None}
 ctl_lock = threading.Lock()
 
@@ -56,7 +59,7 @@ def set_tracking(on):
         return ctl["error"]
 
 
-def process(jpg):
+def process(jpg, ts=None):
     """Apply the view flips and, if a target is armed, find it, aim, and draw. Returns (JPEG, found flag)."""
     if not (view["mirror"] or view["vflip"] or tracker.armed):
         return jpg, False                # nothing to change: the Pi's JPEG goes straight to the browser
@@ -75,10 +78,16 @@ def process(jpg):
             found = True
             cx, cy, fw, fh = face
             cv2.rectangle(frame, (int(cx - fw / 2), int(cy - fh / 2)), (int(cx + fw / 2), int(cy + fh / 2)), (0, 255, 0), 2)
+            ax, ay = cx, cy                    # the point to aim at: the target, or where it is heading
+            if cfg["lead_ms"] > 0:
+                ax, ay = predictor.update(time.time() if ts is None else ts, cx, cy, cfg["lead_ms"] / 1000, (w, h))
+                cv2.circle(frame, (int(ax), int(ay)), 6, (0, 255, 255), -1)
+            else:
+                predictor.reset()
             try:
                 with ctl_lock:
                     if ctl["tracking"]:
-                        ctl["angles"] = ctl["aimer"].update((cx - w / 2) / (w / 2), (cy - h / 2) / (h / 2))
+                        ctl["angles"] = ctl["aimer"].update((ax - w / 2) / (w / 2), (ay - h / 2) / (h / 2))
             except Exception as e:
                 with ctl_lock:
                     ctl["tracking"], ctl["error"] = False, f"gimbal: {e}"
@@ -97,7 +106,7 @@ def capture_loop():
         seq, ts, jpg = item
         last_frame = time.time()
         age_ms = (last_frame - ts) * 1000     # how long the frame waited before we got to it
-        jpg, found = process(jpg)
+        jpg, found = process(jpg, ts)
         arrivals = [a for a in arrivals + [ts] if ts - a < 3]
         fps = (len(arrivals) - 1) / (arrivals[-1] - arrivals[0]) if len(arrivals) > 1 else 0
         count += 1
@@ -107,7 +116,7 @@ def capture_loop():
                  "error": ctl["error"] or (aimer.gimbal.error if aimer else None),
                  "angles": ctl["angles"], "sign": aimer.sign if aimer else None,
                  "mode": aimer.mode if aimer else "map", "view": dict(view),
-                 "dropped": feed.dropped, "age_ms": round(age_ms)}
+                 "dropped": feed.dropped, "age_ms": round(age_ms), "cfg": dict(cfg)}
         with new_frame:
             latest.update(jpg=jpg, seq=count, state=state)
             new_frame.notify_all()
@@ -185,6 +194,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/view" and q.get("key", [""])[0] in view:
             view[q["key"][0]] = q.get("on", ["0"])[0] == "1"
             tracker.last = None          # the picture just changed orientation: forget the old position
+            predictor.reset()
+            return self._send(b"{}")
+        if url.path == "/cfg" and "lead_ms" in q:
+            cfg["lead_ms"] = max(0, min(800, int(float(q["lead_ms"][0]))))
             return self._send(b"{}")
         if url.path == "/clear":
             tracker.clear()
