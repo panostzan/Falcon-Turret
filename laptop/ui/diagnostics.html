@@ -3,6 +3,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Turret diagnostics</title>
 <link rel="stylesheet" href="/ui.css">
+<script>document.documentElement.style.height="auto"</script>
 
 <header class="top">
   <div class="brand">Turret</div>
@@ -10,7 +11,7 @@
   <div class="status"><span id="st-video">Connecting…</span><span id="st-gimbal"></span><span id="st-depth"></span></div>
 </header>
 
-<main class="stack">
+<main class="stack" style="flex:1;min-height:0;overflow:auto;align-content:start">
   <div class="grid2">
     <section class="panel">
       <h2>Links and sensors</h2>

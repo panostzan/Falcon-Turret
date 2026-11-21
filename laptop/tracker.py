@@ -20,7 +20,7 @@ LOST_AFTER = 10        # forget the last position after this many frames without
 # OpenCV HSV: hue 0-180, so cyan/teal sits near 90 and pure blue near 120.
 PRESETS = {
     "teal": ((75, 70, 40), (105, 255, 255)),
-    "neon blue": ((100, 120, 80), (125, 255, 255)),
+    "blue": ((108, 150, 60), (132, 255, 255)),     # pure blue: hue 120 of 180 in OpenCV
 }
 
 

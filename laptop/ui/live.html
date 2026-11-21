@@ -11,27 +11,26 @@
 </header>
 
 <main class="layout">
-  <section>
+  <section class="main">
     <div class="stage">
       <img id="video" alt="Live camera picture">
       <div id="badge" class="badge">Connecting…</div>
     </div>
-    <p class="hint" id="hint">Click the target in the picture to learn its color.</p>
-
     <div class="layers" id="layers" role="group" aria-label="Layers"></div>
     <div class="presets">Views
       <button data-preset="tracking">Tracking</button>
       <button data-preset="depth">Depth</button>
       <button data-preset="clean">Clean</button>
+      <span class="hint" id="hint">Click the target in the picture to learn its color.</span>
     </div>
   </section>
 
-  <aside class="stack">
+  <aside class="side">
     <div class="panel">
       <h2>Target</h2>
       <div class="row">
         <button id="p-teal">Teal</button>
-        <button id="p-blue">Neon blue</button>
+        <button id="p-blue">Blue</button>
         <button id="p-clear">Clear</button>
       </div>
       <div class="row" style="margin-top:12px">
@@ -138,7 +137,7 @@ video.onclick = async e => {
 
 /* target and tracking */
 $('p-teal').onclick = () => api.post('/preset?name=teal');
-$('p-blue').onclick = () => api.post('/preset?name=neon%20blue');
+$('p-blue').onclick = () => api.post('/preset?name=blue');
 $('p-clear').onclick = () => api.post('/clear');
 $('track').onclick = async () => { const r = await api.post('/track?on=' + (S && S.tracking ? 0 : 1)); $('err').textContent = r.error || ''; };
 

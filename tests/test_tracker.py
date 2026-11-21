@@ -79,7 +79,7 @@ def test_fragmented():
 def test():
     test_fragmented()
     follow_preset("teal", (128, 128, 0))          # BGR of teal (0,128,128)
-    follow_preset("neon blue", (255, 100, 0))     # BGR of electric blue (0,100,255)
+    follow_preset("blue", (255, 0, 0))           # BGR of pure blue
     follow("white bottle", (215, 215, 215), wall=False)
     follow("white bottle near white wall", (215, 215, 215), wall=True)
     follow("orange marker", (30, 120, 250), wall=False)
