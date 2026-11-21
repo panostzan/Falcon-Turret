@@ -119,6 +119,52 @@ class FrameFeed:
             return (self._seq, *self._latest)
 
 
+class CameraFeed:
+    """Same interface as FrameFeed, but the video comes from a USB webcam plugged into THIS laptop (DirectShow index:
+    0 is the built-in camera, then 1, 2 ...). Useful without the Pi, and as a fallback if the hotspot drops.
+    Only the newest picture is kept; `error` says why the camera could not be used (or None)."""
+
+    def __init__(self, index, quality=90):
+        self.index, self.quality, self.error, self.dropped = index, quality, None, 0
+        self._cv = threading.Condition()
+        self._latest, self._seq, self._consumed = None, 0, 0
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        import cv2
+        while True:
+            cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            if not cap.isOpened():
+                self.error = f"cannot open camera {self.index}: check the number and close other programs using it"
+                cap.release()
+                time.sleep(2)
+                continue
+            self.error = None
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    self.error = f"camera {self.index} stopped delivering pictures"
+                    break
+                jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, self.quality])[1].tobytes()
+                with self._cv:
+                    if self._seq != self._consumed:
+                        self.dropped += 1
+                    self._seq += 1
+                    self._latest = (time.time(), jpg)
+                    self._cv.notify_all()
+            cap.release()
+            time.sleep(1)
+
+    def get(self, last_seq, timeout=2.0):
+        with self._cv:
+            if not self._cv.wait_for(lambda: self._latest is not None and self._seq != last_seq, timeout):
+                return None
+            self._consumed = self._seq
+            return (self._seq, *self._latest)
+
+
 if __name__ == "__main__":
     n, t0 = 0, time.time()
     for _, jpg in jpeg_frames():

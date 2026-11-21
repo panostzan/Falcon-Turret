@@ -23,13 +23,16 @@ from aim import Aimer              # noqa: E402
 from engage import Engagement     # noqa: E402
 from gimbal import AsyncGimbal     # noqa: E402
 from predict import LeadPredictor  # noqa: E402
-from receiver import FrameFeed       # noqa: E402
+from receiver import CameraFeed, FrameFeed   # noqa: E402
 from telemetry import Telemetry    # noqa: E402
 from depth_nn import NeuralDepth, overlay as depth_overlay   # noqa: E402  (loads onnxruntime only when the layer is first switched on)
 from tracker import PRESETS, ColorTracker   # noqa: E402
 
 # "COM7" for USB serial, or e.g. "udp:192.168.137.50" for the Wi-Fi firmware. Override: set GIMBAL=udp:...
 GIMBAL_PORT = os.environ.get("GIMBAL", "COM7")
+# Video source: the Pi by default. `python laptop/app.py --camera 1` (or CAMERA=1) uses a USB webcam on this laptop instead.
+CAMERA = (int(sys.argv[sys.argv.index("--camera") + 1]) if "--camera" in sys.argv
+          else int(os.environ["CAMERA"]) if os.environ.get("CAMERA", "").isdigit() else None)
 PAGE = open(os.path.join(HERE, "dashboard.html"), encoding="utf-8").read().encode()
 BOOT = time.time()                  # lets the page detect a server restart and reconnect its video
 
@@ -139,7 +142,7 @@ def process(jpg, ts=None):
 
 
 def capture_loop():
-    feed = FrameFeed()
+    feed = CameraFeed(CAMERA) if CAMERA is not None else FrameFeed()    # a laptop webcam, or the Pi's stream
     arrivals, count, seq, last_frame = [], 0, -1, time.time()
     while True:
         item = feed.get(seq)
