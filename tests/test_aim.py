@@ -2,7 +2,6 @@
 import math
 import os
 import sys
-os.environ.setdefault("TURRET_LIMITS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "limits_full.json"))
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "laptop"))
 from aim import H_FOV, V_FOV, Aimer, pixel_error_to_degrees   # noqa: E402

@@ -1,14 +1,11 @@
 """Serial driver for the ESP32 pan/tilt gimbal (firmware: Arduino/gimbal/gimbal.ino).
 
 Protocol (115200 baud, newline-terminated):
-    P<0-180>   pan to angle        T<90-180> tilt to angle
-    C          home                S          report status
-    D          release (servos go limp)   A  resume
+    P<0-180>   pan to angle        T<90-180>  tilt to angle
+    C          center (P90 T135)   S          report status
 Every accepted command is answered with "P<pan> T<tilt>"; bad input gets "ERR ...".
 Servos have no position feedback, so the angles are the last values commanded.
 """
-import json
-import os
 import re
 import socket
 import threading
@@ -17,33 +14,9 @@ from collections import deque
 
 import serial
 
-LIMITS_FILE = os.environ.get("TURRET_LIMITS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "limits.json"))
-
-
-def load_limits(path=LIMITS_FILE):
-    """The safe travel of each axis and the home position, in degrees, from limits.json.
-
-    Every angle this software sends is clamped to these ranges, so a mistake anywhere else can never push the
-    gimbal against a mechanical stop (the ESP firmware enforces the same ranges as a second layer). There are no
-    silent defaults: a missing or invalid file is an error."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        pan, tilt, center = (tuple(data[k]) for k in ("pan", "tilt", "center"))
-    except (OSError, ValueError, KeyError, TypeError) as e:
-        raise RuntimeError(f"cannot load gimbal limits from {path}: {e}")
-    if not all(len(v) == 2 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v)
-               for v in (pan, tilt, center)):
-        raise RuntimeError(f"{path}: pan, tilt and center must each be two numbers")
-    for name, (lo, hi), c in (("pan", pan, center[0]), ("tilt", tilt, center[1])):
-        if not (0 <= lo < hi <= 180):
-            raise RuntimeError(f"{path}: {name} range {lo}..{hi} must satisfy 0 <= min < max <= 180")
-        if not lo <= c <= hi:
-            raise RuntimeError(f"{path}: {name} home {c} is outside its range {lo}..{hi}")
-    return pan, tilt, center
-
-
-PAN_RANGE, TILT_RANGE, CENTER = load_limits()
+PAN_RANGE = (0, 180)
+TILT_RANGE = (90, 180)       # firmware rejects tilt below 90
+CENTER = (90, 135)
 _REPLY = re.compile(r"P(\d+)\s+T(\d+)")
 
 
@@ -88,21 +61,17 @@ def _clamp(v, lo, hi):
 
 
 class Gimbal:
-    def __init__(self, port=None, baud=115200, link=None, settle_s=0.3):
+    def __init__(self, port=None, baud=115200, link=None, settle_s=2.0):
         """port: 'COM7' (USB serial) or 'udp:192.168.137.50' (Wi-Fi firmware).
         link: a pre-opened serial-like object (used by tests)."""
         if link is None and str(port).startswith("udp:"):
             link = UdpLink(port[4:])
         elif link is None:
-            link = serial.Serial()
-            link.port, link.baudrate, link.timeout = port, baud, 0.3
-            link.dtr = link.rts = False   # the ESP32's auto-reset wires: keep them low so opening the port does NOT
-            link.open()                   # reboot it (a reboot sends the servos to their home position)
-            time.sleep(settle_s)
+            link = serial.Serial(port, baud, timeout=0.3)
+            time.sleep(settle_s)          # opening the port resets the ESP32; wait for boot
             link.reset_input_buffer()
         self.link = link
         self.pan, self.tilt = CENTER
-        self.pan_range, self.tilt_range = PAN_RANGE, TILT_RANGE   # free() widens the tilt range for calibration
 
     def _send(self, cmd):
         self.link.write(cmd.encode() + b"\n")
@@ -119,33 +88,13 @@ class Gimbal:
         return self._send("S")
 
     def center(self):
-        """Go to the home position from limits.json (sent as explicit angles, so it always agrees with them)."""
-        self._send(f"P{CENTER[0]}")
-        return self._send(f"T{CENTER[1]}")
-
-    def release(self):
-        """Stop holding the servos (they go limp). Any later move re-attaches them."""
-        return self._send("D")
-
-    def resume(self):
-        """Hold the last angles again after release()."""
-        return self._send("A")
-
-    def free(self):
-        """Calibration only: lift the tilt limit to 0-180 (here and in the ESP, until it reboots or normal() is called)."""
-        self.tilt_range = (0, 180)
-        return self._send("W")
-
-    def normal(self):
-        """Back to the safe tilt range from limits.json."""
-        self.tilt_range = TILT_RANGE
-        return self._send("N")
+        return self._send("C")
 
     def move_to(self, pan=None, tilt=None):
         """Absolute move. Sends only the axes that actually change; angles are clamped to safe ranges."""
-        if pan is not None and (p := _clamp(pan, *self.pan_range)) != self.pan:
+        if pan is not None and (p := _clamp(pan, *PAN_RANGE)) != self.pan:
             self._send(f"P{p}")
-        if tilt is not None and (t := _clamp(tilt, *self.tilt_range)) != self.tilt:
+        if tilt is not None and (t := _clamp(tilt, *TILT_RANGE)) != self.tilt:
             self._send(f"T{t}")
         return self.pan, self.tilt
 
@@ -220,12 +169,6 @@ class AsyncGimbal:
         with self._io:
             self.pan, self.tilt = self._g.center()
         return self.pan, self.tilt
-
-    def release(self):
-        with self._lock:
-            self._want = {"P": None, "T": None}
-        with self._io:
-            return self._g.release()
 
     def close(self):
         self._stop = True

@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from aim import Aimer              # noqa: E402
 from engage import Engagement     # noqa: E402
-from gimbal import AsyncGimbal, Gimbal   # noqa: E402
+from gimbal import AsyncGimbal     # noqa: E402
 from predict import LeadPredictor  # noqa: E402
 from receiver import FrameFeed       # noqa: E402
 from telemetry import Telemetry    # noqa: E402
@@ -65,26 +65,6 @@ def set_tracking(on):
             ctl["tracking"], ctl["error"] = True, None
         except Exception as e:          # port busy / ESP unplugged / bad reply
             ctl["tracking"], ctl["error"] = False, f"gimbal: {e}"
-        return ctl["error"]
-
-
-def release_servos():
-    """Stop tracking and let the servos go limp (any later move re-attaches them). Returns an error string or None."""
-    with ctl_lock:
-        ctl["tracking"] = False
-        engage.arm(False, time.time())
-        try:
-            if ctl["aimer"] is not None:
-                ctl["aimer"].gimbal.release()
-            else:
-                g = Gimbal(GIMBAL_PORT)
-                try:
-                    g.release()
-                finally:
-                    g.close()
-            ctl["error"] = None
-        except Exception as e:
-            ctl["error"] = f"gimbal: {e}"
         return ctl["error"]
 
 
@@ -250,8 +230,6 @@ class Handler(BaseHTTPRequestHandler):
             tracker.last = None          # the picture just changed orientation: forget the old position
             predictor.reset()
             return self._send(b"{}")
-        if url.path == "/release":
-            return self._send(json.dumps({"error": release_servos()}).encode())
         if url.path == "/arm":
             engage.arm(q.get("on", ["0"])[0] == "1", time.time())
             return self._send(b"{}")

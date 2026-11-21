@@ -1,13 +1,8 @@
 // Wi-Fi version of gimbal.ino: same pins, same commands, same replies; commands arrive as UDP packets
 // (port 4210) as well as over USB serial. Replies go back to whoever sent the command.
 //
-// Commands (one per packet / line):  P<0-180> pan   T<90-180> tilt   C home   S status   D release (servos go limp)
-//                                    A resume (re-attach and hold the last angles)
-//                                    W widen tilt to 0-180 (for finding the real travel)   N back to the safe tilt range
-// The widened range lasts only until the ESP reboots or N is sent.
-// Reply: "P<pan> T<tilt>" or "ERR ...". Any P/T/C command re-attaches released servos.
-// SAFETY: the firmware itself refuses angles outside the gimbal's travel (pan 0-180, tilt 90-180),
-// whatever the host sends (angles are clamped, never passed through).
+// Commands (one per packet / line):  P<0-180> pan   T<90-180> tilt   C center   S status
+// Reply: "P<pan> T<tilt>" or "ERR ...".
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
@@ -16,13 +11,9 @@
 
 const uint16_t UDP_PORT = 4210;
 const int PAN_PIN = 19, TILT_PIN = 18;
-const int PAN_MIN = 0, PAN_MAX = 180, TILT_MIN = 90, TILT_MAX = 180;   // physical travel of this gimbal
-const int PAN_HOME = 90, TILT_HOME = 135;                             // start position (middle of each range)
 
 Servo panServo, tiltServo;
-int panAngle = PAN_HOME, tiltAngle = TILT_HOME;
-bool attached = false;
-int tiltLo = TILT_MIN, tiltHi = TILT_MAX;   // current tilt limits (safe range unless widened with W)
+int panAngle = 90, tiltAngle = 135;
 WiFiUDP udp;
 char serialBuf[16];
 size_t serialUsed = 0;
@@ -34,23 +25,6 @@ void moveServo(Servo &servo, int angle) {
   servo.writeMicroseconds(500 + (long)angle * (2400 - 500) / 180);
 }
 
-void attachServos() {
-  if (attached) return;
-  panServo.setPeriodHertz(50);
-  tiltServo.setPeriodHertz(50);
-  panServo.attach(PAN_PIN, 500, 2400);
-  tiltServo.attach(TILT_PIN, 500, 2400);
-  attached = true;
-  moveServo(panServo, panAngle);
-  moveServo(tiltServo, tiltAngle);
-}
-
-void releaseServos() {   // stop sending the position signal: the servos go limp
-  panServo.detach();
-  tiltServo.detach();
-  attached = false;
-}
-
 String status() {
   return "P" + String(panAngle) + " T" + String(tiltAngle);
 }
@@ -59,36 +33,22 @@ String status() {
 String runCommand(const char *cmd) {
   size_t n = strlen(cmd);
   if (strcmp(cmd, "C") == 0) {
-    panAngle = PAN_HOME;
-    tiltAngle = TILT_HOME;
-    attachServos();
+    panAngle = 90;
+    tiltAngle = 135;
     moveServo(panServo, panAngle);
     moveServo(tiltServo, tiltAngle);
   } else if (strcmp(cmd, "S") == 0) {
     // status only; servos give no position feedback
-  } else if (strcmp(cmd, "D") == 0) {
-    releaseServos();
-  } else if (strcmp(cmd, "A") == 0) {
-    attachServos();
-  } else if (strcmp(cmd, "W") == 0) {
-    tiltLo = 0;
-    tiltHi = 180;
-  } else if (strcmp(cmd, "N") == 0) {
-    tiltLo = TILT_MIN;
-    tiltHi = TILT_MAX;
-    tiltAngle = constrain(tiltAngle, tiltLo, tiltHi);   // bring the tilt back inside the safe range
-    if (attached) moveServo(tiltServo, tiltAngle);
   } else if ((cmd[0] == 'P' || cmd[0] == 'T') && n > 1) {
     if (n > 4) return "ERR invalid angle";
     for (size_t i = 1; i < n; ++i)
       if (cmd[i] < '0' || cmd[i] > '9') return "ERR invalid angle";
     int angle = atoi(cmd + 1);
-    attachServos();
     if (cmd[0] == 'P') {
-      panAngle = constrain(angle, PAN_MIN, PAN_MAX);
+      panAngle = constrain(angle, 0, 180);
       moveServo(panServo, panAngle);
     } else {
-      tiltAngle = constrain(angle, tiltLo, tiltHi);
+      tiltAngle = constrain(angle, 90, 180);
       moveServo(tiltServo, tiltAngle);
     }
   } else {
@@ -106,7 +66,12 @@ void connectWifi() {
 
 void setup() {
   Serial.begin(115200);
-  attachServos();
+  panServo.setPeriodHertz(50);
+  tiltServo.setPeriodHertz(50);
+  panServo.attach(PAN_PIN, 500, 2400);
+  tiltServo.attach(TILT_PIN, 500, 2400);
+  moveServo(panServo, panAngle);
+  moveServo(tiltServo, tiltAngle);
   connectWifi();
   udp.begin(UDP_PORT);
   Serial.println(status());

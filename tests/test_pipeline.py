@@ -2,7 +2,6 @@
 gimbal -> simulated ESP. Run: python tests/test_pipeline.py"""
 import os
 import sys
-os.environ.setdefault("TURRET_LIMITS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "limits_full.json"))
 import time
 
 HERE = os.path.dirname(__file__)
