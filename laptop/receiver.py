@@ -1,10 +1,12 @@
 """Receives the Pi's JPEG frame stream ([u32 length][JPEG]) over one persistent SSH connection."""
 import os
 import re
+import socket
 import subprocess
 import struct
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 USER = "qnxuser"
 PI_MAC = "88-a2-9e-a9-a5-4e"           # the Pi's hardware address; its IP changes when the hotspot restarts
@@ -13,18 +15,39 @@ KEY = os.path.expanduser("~/.ssh/turret_ed25519")
 FPS, QUALITY = 30, 90   # recorder fps, JPEG quality (lower = smaller frames, faster)
 
 
+def _ssh_open(ip, timeout=0.6):
+    try:
+        with socket.create_connection((ip, 22), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _arp_table():
+    try:
+        return subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def find_pi_ip():
-    """Look the Pi up by MAC in the laptop's ARP table (PI_HOST env var overrides)."""
+    """Find the Pi on the hotspot network. Its IP changes whenever the hotspot restarts, and Windows keeps stale ARP
+    entries for old addresses, so a candidate counts only if its SSH port actually answers.
+    Order: PI_HOST env var; ARP entries with the Pi's MAC that answer; a scan of the subnet; the last known address."""
     if os.environ.get("PI_HOST"):
         return os.environ["PI_HOST"]
-    try:
-        table = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=5).stdout
-        m = re.search(r"(192\.168\.137\.\d+)\s+" + PI_MAC, table, re.I)
-        if m:
-            return m[1]
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return FALLBACK_IP
+    pattern = r"(192\.168\.137\.\d+)\s+" + PI_MAC
+    for ip in re.findall(pattern, _arp_table(), re.I):
+        if _ssh_open(ip):
+            return ip
+    with ThreadPoolExecutor(64) as pool:                   # not in ARP (or stale): look for every SSH host
+        ips = [f"192.168.137.{i}" for i in range(2, 255)]
+        hits = [ip for ip, ok in zip(ips, pool.map(_ssh_open, ips)) if ok]
+    table = _arp_table()                                   # the scan just filled in the MAC addresses
+    for ip in hits:
+        if re.search(re.escape(ip) + r"\s+" + PI_MAC, table, re.I):
+            return ip
+    return hits[0] if len(hits) == 1 else FALLBACK_IP      # a single SSH host on this network is the Pi
 
 
 def _spawn(quality):
