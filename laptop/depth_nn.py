@@ -122,7 +122,7 @@ class DepthSmoother:
         (dx, dy), response = cv2.phaseCorrelate(self.src, thumb, _WINDOW)
         if response < 0.15 or abs(dx) > self.MAX_SHIFT or abs(dy) > self.MAX_SHIFT:
             return 0.0, 0.0
-        if abs(dx) < 0.3 and abs(dy) < 0.3:                     # measurement noise, not movement
+        if abs(dx) < 0.8 and abs(dy) < 0.8:                     # measurement noise, not movement
             return 0.0, 0.0
         return dx, dy
 
@@ -134,10 +134,10 @@ class DepthSmoother:
             return None
         src = self.src
         dx, dy = self._shift(thumb)
-        if dx or dy:
+        if abs(dx) >= 1.5 or abs(dy) >= 1.5:     # only a real camera movement; a sub-pixel warp of sharp edges invents differences
             src = cv2.warpAffine(src, np.float32([[1, 0, dx], [0, 1, dy]]), THUMB, borderMode=cv2.BORDER_REPLICATE)
         diff = cv2.GaussianBlur(np.abs(thumb - src), (5, 5), 0)
-        return np.clip((diff - 10.0) / 25.0, 0.0, 1.0).astype(np.float32)
+        return np.clip((diff - 18.0) / 30.0, 0.0, 1.0).astype(np.float32)
 
     def current(self, now, thumb=None):
         """The depth map to show right now (the fade, then the motion compensation)."""

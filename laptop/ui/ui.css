@@ -93,7 +93,7 @@ button[aria-pressed="true"] { background: var(--teal); color: var(--teal-ink); b
 button:disabled { opacity: .5; cursor: default; }
 
 /* layer toggles sit directly under the picture */
-.layers { flex: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.layers { flex: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .layer { display: grid; gap: 1px; text-align: left; padding: 7px 12px; text-transform: none; letter-spacing: .02em; font-size: 14px; background: var(--panel); border-left: 3px solid var(--line); }
 .layer b { font-weight: 600; }
 .layer span { font: 11px var(--mono); color: var(--dim); text-transform: uppercase; }
