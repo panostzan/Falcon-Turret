@@ -45,6 +45,54 @@ def colorize(d, num_disparities):
     return col
 
 
+def tidy(d):
+    """Make the map readable: fill SMALL holes and smooth. Big unknown areas stay black (no invented depth)."""
+    valid = (d > 0).astype(np.uint8)
+    closed = cv2.morphologyEx(valid, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
+    holes = (closed > 0) & (valid == 0)
+    out = d.copy()
+    if holes.any() and valid.any():
+        top = float(d.max())
+        d8 = np.clip(d * 255.0 / top, 0, 255).astype(np.uint8)
+        filled = cv2.inpaint(d8, holes.astype(np.uint8) * 255, 5, cv2.INPAINT_TELEA).astype(np.float32) * top / 255.0
+        out[holes] = filled[holes]
+    out = np.where(out > 0, cv2.bilateralFilter(out, 7, 25, 7), 0)
+    return out.astype(np.float32)
+
+
+def value_range(d, previous=None):
+    """Colour range from what the scene actually contains (3rd..97th percentile of valid values), eased over time
+    so the colours don't flicker. Returns (low, high)."""
+    v = d[d > 0]
+    if v.size < 50:
+        return previous or (0.0, 1.0)
+    lo, hi = (float(x) for x in np.percentile(v, [3, 97]))
+    hi = max(hi, lo + 4.0)                                    # never stretch noise over the whole colour bar
+    return (lo, hi) if previous is None else (0.85 * previous[0] + 0.15 * lo, 0.85 * previous[1] + 0.15 * hi)
+
+
+def render(left_bgr, d, lo, hi):
+    """The camera picture, dimmed where the depth is unknown, with the depth colours laid over the rest."""
+    img = cv2.resize(left_bgr, SIZE)
+    t = np.clip((d - lo) / max(1e-3, hi - lo), 0, 1)
+    col = cv2.applyColorMap((255 * t).astype(np.uint8), cv2.COLORMAP_TURBO)
+    out = (img * 0.35).astype(np.uint8)
+    m = d > 0
+    out[m] = (0.30 * img[m] + 0.70 * col[m]).astype(np.uint8)
+    return out
+
+
+def legend(width):
+    """A near/far colour bar to put under the picture."""
+    bar = cv2.applyColorMap(np.tile(np.linspace(0, 255, width, dtype=np.uint8), (14, 1)), cv2.COLORMAP_TURBO)
+    strip = np.full((34, width, 3), 20, np.uint8)
+    strip[2:16] = bar
+    cv2.putText(strip, "far", (4, 31), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (230, 230, 230), 1, cv2.LINE_AA)
+    cv2.putText(strip, "near", (width - 44, 31), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (230, 230, 230), 1, cv2.LINE_AA)
+    cv2.putText(strip, "relative depth, not metres", (width // 2 - 105, 31), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (230, 230, 230), 1, cv2.LINE_AA)
+    return strip
+
+
 def pick_order(matcher, left_gray, right_gray):
     """True if the pair is in the right order (left camera first). Features shift one way for a correct pair; swapped
     cameras make almost everything invalid, so the order with more valid pixels wins."""
@@ -67,7 +115,7 @@ def main():
     title = "Relative depth: warm = near, cool = far, black = unsure (Q quits)"
     cv2.namedWindow(title)
     frozen, last, fps, t_prev = False, None, 0.0, time.time()
-    swap, order_known, valid = False, False, 0.0
+    swap, order_known, valid, rng = False, False, 0.0, None
     with WindowsStereo(args.left, args.right, max_skew_s=.04) as cams:
         while True:
             if not frozen:
@@ -81,12 +129,13 @@ def main():
                             print(f"the cameras look swapped (valid {a:.0%} vs {b:.0%}): using them the other way round", flush=True)
                 if swap:
                     left, right, lg, rg = right, left, rg, lg
-                d = disparity(matcher, lg, rg)
+                d = tidy(disparity(matcher, lg, rg))
                 valid = (d > 0).mean()
+                rng = value_range(d, rng)
                 now = time.time()
                 fps = 0.9 * fps + 0.1 / max(1e-3, now - t_prev) if fps else 1 / max(1e-3, now - t_prev)
                 t_prev = now
-                last = np.hstack([cv2.resize(left.image, SIZE), colorize(d, nd)])
+                last = np.vstack([np.hstack([cv2.resize(left.image, SIZE), render(left.image, d, *rng)]), legend(2 * SIZE[0])])
             canvas = last.copy()
             note = "FROZEN" if frozen else f"{valid:.0%} of pixels valid | {fps:.0f} fps | range {nd}px"
             cv2.rectangle(canvas, (0, 0), (canvas.shape[1], 26), (20, 20, 20), -1)
