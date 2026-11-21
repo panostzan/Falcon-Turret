@@ -12,14 +12,38 @@ img{width:100%;border-radius:8px;background:#000;display:block;aspect-ratio:4/3;
 button{background:var(--acc);color:#04121f;border:0;border-radius:6px;padding:8px 12px;font-weight:600;cursor:pointer;margin:2px 4px 2px 0}
 button.off{background:#30363d;color:var(--fg)}
 .err{color:var(--bad);font-size:12px;margin-top:6px}
+button.armed{background:var(--bad);color:#fff}
+.tele{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-top:10px}
+canvas{width:100%;height:90px;background:#0b0f14;border-radius:6px;display:block;margin:6px 0 4px}
+.stat{font:12px ui-monospace,monospace;color:var(--mut)}
+.ev{font:12px ui-monospace,monospace;max-height:120px;overflow:auto;color:var(--fg)}
+.ev span{color:var(--mut)}
 </style>
 <div class="wrap">
- <div class="video"><img id="v" alt="camera"><div class="k" style="margin-top:6px">Click the target (e.g. the white bottle) to lock its color.</div></div>
+ <div class="video"><img id="v" alt="camera"><div class="k" style="margin-top:6px">Click the target (e.g. the white bottle) to lock its color.</div>
+ <div class="tele">
+  <div class="card"><div class="k">Frame latency (ms): wait <span style="color:#f0883e">&#9632;</span> + processing <span style="color:#58a6ff">&#9632;</span></div>
+   <canvas id="c1" width="300" height="90"></canvas><div class="stat" id="s1">–</div></div>
+  <div class="card"><div class="k">Frame interval (ms)</div>
+   <canvas id="c2" width="300" height="90"></canvas><div class="stat" id="s2">–</div></div>
+  <div class="card"><div class="k">Servo angles: pan <span style="color:#3fb950">&#9632;</span> tilt <span style="color:#bc8cff">&#9632;</span></div>
+   <canvas id="c3" width="300" height="90"></canvas><div class="stat" id="s3">–</div></div>
+  <div class="card"><div class="k">Target speed (px/s)</div>
+   <canvas id="c4" width="300" height="90"></canvas><div class="stat" id="s4">–</div></div>
+ </div>
+ <div class="card" style="margin-top:10px"><div class="k">Event log</div><div class="ev" id="ev">–</div></div>
+ </div>
  <div class="side">
   <div class="card"><span id="st" class="badge">connecting…</span>
    <div style="margin-top:8px"><button id="trk" class="off" onclick="toggle()">Tracking: OFF</button><button class="off" onclick="post('/clear')">Clear target</button>
    <div class="k" style="margin-top:8px">Track a color</div><button class="off" onclick="post('/preset?name=teal')">Teal</button><button class="off" onclick="post('/preset?name=neon%20blue')">Neon blue</button></div>
    <div id="err" class="err"></div></div>
+  <div class="card"><div class="k">Mission</div>
+   <span id="es" class="badge">IDLE</span>
+   <div style="margin-top:8px"><button id="arm" class="off" onclick="toggleArm()">ARM: OFF</button>
+   <button id="asc" class="off" onclick="toggleScan()">Auto-scan: OFF</button></div>
+   <div class="k" style="margin-top:6px">Shots (simulated emitter)</div><div class="v" id="shots">0</div>
+   <div class="k">Fires only when armed, locked, dwelled and off cooldown. Tracking OFF disarms.</div></div>
   <div class="card"><div class="k">FPS</div><div class="v" id="fps">–</div>
    <div class="k">Gimbal (pan / tilt)</div><div class="v" id="ang">–</div></div>
   <div class="card"><div class="k">Picture orientation</div>
@@ -59,6 +83,32 @@ async function toggle(){const r=await post('/track?on='+(tracking?0:1));$('err')
 let viewState={mirror:true,vflip:false,mask:false};
 async function toggleView(k){await post('/view?key='+k+'&on='+(viewState[k]?0:1))}
 async function setMode(m){await post('/mode?name='+m)}
+let eng={armed:false,auto_scan:false};
+async function toggleArm(){await post('/arm?on='+(eng.armed?0:1))}
+async function toggleScan(){await post('/autoscan?on='+(eng.auto_scan?0:1))}
+const STATE_COLORS={IDLE:'#30363d',SEARCH:'#9e6a03',ACQUIRE:'#9e6a03',TRACK:'#1f6feb',LOCK:'#238636',COOLDOWN:'#8957e5'};
+function chart(id,sets,lo,hi){
+ const c=$(id),g=c.getContext('2d'),W=c.width,H=c.height;g.clearRect(0,0,W,H);
+ let min=lo,max=hi;
+ if(min===undefined){const all=sets.flatMap(s=>s.v).filter(x=>x!=null);min=0;max=Math.max(1,...all)*1.15}
+ g.strokeStyle='#2a3441';g.lineWidth=1;g.beginPath();for(let i=1;i<4;i++){g.moveTo(0,H*i/4);g.lineTo(W,H*i/4)}g.stroke();
+ for(const s of sets){g.strokeStyle=s.color;g.lineWidth=1.5;g.beginPath();let pen=false;
+  s.v.forEach((y,i)=>{if(y==null){pen=false;return}
+   const px=i/Math.max(1,s.v.length-1)*W,py=H-4-(y-min)/(max-min)*(H-8);pen?g.lineTo(px,py):g.moveTo(px,py);pen=true});g.stroke()}
+}
+const f=(o,k)=>o?`${o.p50} / ${o.p95} / ${o.max}`:'–';
+async function teleTick(){try{const t=await (await fetch('/telemetry')).json(),S=t.series,st=t.stats;
+ chart('c1',[{v:S.age_ms,color:'#f0883e'},{v:S.proc_ms,color:'#58a6ff'}]);
+ chart('c2',[{v:S.interval_ms,color:'#e6edf3'}]);
+ chart('c3',[{v:S.pan,color:'#3fb950'},{v:S.tilt,color:'#bc8cff'}],0,180);
+ chart('c4',[{v:S.speed,color:'#d29922'}]);
+ $('s1').textContent=`wait ${f(st.age_ms)} ms · proc ${f(st.proc_ms)} ms (p50 / p95 / max)`+(t.servo_rtt_ms!=null?` · servo cmd ${t.servo_rtt_ms} ms`:'');
+ $('s2').textContent=`${f(st.interval_ms)} ms (p50 / p95 / max) → ~${st.interval_ms.p50?Math.round(1000/st.interval_ms.p50):'–'} fps`;
+ const last=a=>{for(let i=a.length-1;i>=0;i--)if(a[i]!=null)return a[i];return '–'};
+ $('s3').textContent=`pan ${last(S.pan)}° · tilt ${last(S.tilt)}°`;
+ $('s4').textContent=`peak ${st.speed.max} px/s`;
+ $('ev').innerHTML=t.events.length?t.events.slice().reverse().map(e=>`<div><span>${e[0]}s ago</span> ${e[1]}</div>`).join(''):'–';
+ }catch(e){}setTimeout(teleTick,500)}
 const sgn=x=>x>0?'(+)':'(−)';
 async function tick(){try{const s=await (await fetch('/state')).json();
  if(boot!==null&&s.boot!==boot)reconnect();boot=s.boot;
@@ -70,7 +120,11 @@ async function tick(){try{const s=await (await fetch('/state')).json();
  if(s.cfg&&document.activeElement!==$('lead')){$('lead').value=s.cfg.lead_ms;$('leadv').textContent=s.cfg.lead_ms+' ms'}
  if(s.sign){$('sp').textContent=sgn(s.sign.pan);$('stl').textContent=sgn(s.sign.tilt)}
  $('err').textContent=s.error||'';
+ if(s.engage){eng=s.engage;const es=$('es');es.textContent=eng.state;es.style.background=STATE_COLORS[eng.state]||'#30363d';es.style.color='#fff';
+  const a=$('arm');a.textContent='ARM: '+(eng.armed?'ON':'OFF');a.className=eng.armed?'armed':'off';
+  $('asc').textContent='Auto-scan: '+(eng.auto_scan?'ON':'OFF');$('asc').className=eng.auto_scan?'':'off';
+  $('shots').textContent=eng.shots+' / '+eng.max_shots}
  const st=$('st');st.textContent=!s.connected?'No camera':!s.armed?'LIVE: click a target':s.target?(s.tracking?'TRACKING':'LOCKED (gimbal off)'):'Target lost';
  st.style.background=s.target?'var(--ok)':s.connected?'#30363d':'var(--bad)';st.style.color=s.target?'#04120a':'#fff';
- }catch(e){}setTimeout(tick,200)}tick();
+ }catch(e){}setTimeout(tick,200)}tick();teleTick();
 </script>

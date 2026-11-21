@@ -55,6 +55,11 @@ class Aimer:
         self.span = {"pan": span[0], "tilt": span[1]}   # servo degrees covered by the full picture width/height
         self.map_deadband = map_deadband   # servos move in whole degrees, so half a degree is the finest useful
         self._goal = None            # smoothed map-mode target (pan, tilt)
+        self.settled = False         # True when the last update needed no movement: the gimbal is on target
+
+    def reset(self):
+        """Forget the smoothed goal (call when the target was lost, so a new target starts fresh)."""
+        self._goal = None
 
     def set_mode(self, mode):
         if mode not in ("map", "follow"):
@@ -76,6 +81,7 @@ class Aimer:
         # only command an axis once it is off by more than the deadband, so a still target means a still servo
         new_pan = pan if abs(pan - self.gimbal.pan) >= self.map_deadband else None
         new_tilt = tilt if abs(tilt - self.gimbal.tilt) >= self.map_deadband else None
+        self.settled = new_pan is None and new_tilt is None
         return self.gimbal.move_to(pan=new_pan, tilt=new_tilt)
 
     def _follow_step(self, axis, err, fov):
@@ -86,8 +92,10 @@ class Aimer:
         return max(-self.max_step, min(self.max_step, step))
 
     def _follow(self, ex, ey):
-        pan = clamp(self.gimbal.pan + self._follow_step("pan", ex, H_FOV), PAN_RANGE)
-        tilt = clamp(self.gimbal.tilt + self._follow_step("tilt", ey, V_FOV), TILT_RANGE)
+        step_pan, step_tilt = self._follow_step("pan", ex, H_FOV), self._follow_step("tilt", ey, V_FOV)
+        self.settled = step_pan == 0 and step_tilt == 0
+        pan = clamp(self.gimbal.pan + step_pan, PAN_RANGE)
+        tilt = clamp(self.gimbal.tilt + step_tilt, TILT_RANGE)
         return self.gimbal.move_to(pan=pan, tilt=tilt)
 
     def flip(self, axis):

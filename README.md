@@ -25,9 +25,20 @@ Pi address (normally found by its MAC address, because the hotspot changes its I
   `gimbal.py` ESP driver (serial or UDP); `app.py` + `dashboard.html` server and UI (mirror/flip, presets, modes).
 - `esp/gimbal_wifi/` firmware (USB serial + Wi-Fi UDP, same commands as the original `gimbal.ino`);
   copy `wifi_config.example.h` to `wifi_config.h`. `esp/wifi_diag/` is a Wi-Fi scan/diagnostic sketch.
-- `tests/` need no hardware: `test_aim.py`, `test_tracker.py`, `test_gimbal.py`, `test_feed.py`, `test_latency_tool.py`, and
-  `test_pipeline.py` (synthetic camera frames through flip -> tracker -> aim -> async gimbal -> simulated ESP).
+- `tests/` need no hardware: `test_aim.py`, `test_tracker.py`, `test_gimbal.py`, `test_feed.py`, `test_latency_tool.py`,
+  `test_predict.py`, `test_engage.py`, `test_telemetry.py`, `test_server.py` (HTTP endpoints), `node tests/dashboard_smoke.js`
+  (dashboard script against sample data), and `test_pipeline.py` (synthetic camera frames through flip -> tracker -> aim ->
+  async gimbal -> simulated ESP, including the state machine). Run them all: `python tests/run_all.py`.
 - `tools/latency_test.py` measures glass-to-glass camera latency (stop the server first; aim the camera at the screen).
+
+## Mission control and telemetry
+`laptop/engage.py` is the engagement state machine: IDLE -> SEARCH -> ACQUIRE -> TRACK -> LOCK -> (fire) -> COOLDOWN.
+Fire interlocks, all required: master **ARM** on (starts off; switching tracking off disarms), tracking on, target seen
+continuously, gimbal settled on it for 8 frames, target slower than a limit, lock held 0.5 s, cooldown (1.5 s) over, and
+under the shot cap (30 since arming). The emitter is simulated (it only logs) until the IR hardware exists: plug the real
+one in by giving `Engagement` an object with `fire(ts)`. Optional **auto-scan** sweeps the pan 50-130 degrees while searching.
+`laptop/telemetry.py` keeps per-frame timing (frame wait, processing, interval), servo angles, target speed and the ESP's
+command round trip in ring buffers; the dashboard charts them live with p50/p95/max numbers and an event log.
 
 ## Motion prediction
 `laptop/predict.py` keeps a smoothed position and velocity for the target (alpha-beta filter) and the turret aims

@@ -10,6 +10,7 @@ import re
 import socket
 import threading
 import time
+from collections import deque
 
 import serial
 
@@ -124,6 +125,7 @@ class AsyncGimbal:
         self._g = Gimbal(port, **kwargs)
         self.pan, self.tilt = self._g.pan, self._g.tilt
         self.error = None
+        self.rtt_ms = deque(maxlen=100)    # how long the ESP took to answer recent commands
         self._want = {"P": None, "T": None}
         self._lock = threading.Lock()      # guards _want
         self._io = threading.Lock()        # one conversation with the ESP at a time
@@ -149,8 +151,10 @@ class AsyncGimbal:
             for axis, value in want.items():
                 if value is not None:
                     try:
+                        t = time.perf_counter()
                         with self._io:
                             self._g._send(f"{axis}{value}")
+                        self.rtt_ms.append((time.perf_counter() - t) * 1000)
                         self.error = None
                     except Exception as e:
                         self.error = str(e)

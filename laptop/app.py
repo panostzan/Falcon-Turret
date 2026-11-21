@@ -5,7 +5,9 @@ When tracking is switched on from the dashboard the server also follows the clic
 Binds to localhost only.
 """
 import json
+import math
 import os
+import statistics
 import sys
 import threading
 import time
@@ -18,9 +20,11 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from aim import Aimer              # noqa: E402
+from engage import Engagement     # noqa: E402
 from gimbal import AsyncGimbal     # noqa: E402
 from predict import LeadPredictor  # noqa: E402
 from receiver import FrameFeed       # noqa: E402
+from telemetry import Telemetry    # noqa: E402
 from tracker import PRESETS, ColorTracker   # noqa: E402
 
 # "COM7" for USB serial, or e.g. "udp:192.168.137.50" for the Wi-Fi firmware. Override: set GIMBAL=udp:...
@@ -38,6 +42,9 @@ DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
 view = {"mirror": True, "vflip": False, "mask": False}   # flip the picture so it matches the real world (set from the dashboard)
 cfg = {"lead_ms": 250}               # aim this far ahead of a moving target (about the camera-to-servo delay)
 predictor = LeadPredictor()
+engage = Engagement()                 # SEARCH/ACQUIRE/TRACK/LOCK/COOLDOWN and the fire interlocks (simulated emitter)
+telemetry = Telemetry()
+info = {"speed": 0.0, "settled": False}   # target speed (px/s) and whether the gimbal is on target, per frame
 ctl = {"tracking": False, "aimer": None, "error": None, "angles": None}
 ctl_lock = threading.Lock()
 
@@ -47,6 +54,7 @@ def set_tracking(on):
     with ctl_lock:
         if not on:
             ctl["tracking"] = False
+            engage.arm(False, time.time())     # switching tracking off always disarms
             return None
         try:
             if ctl["aimer"] is None:
@@ -61,7 +69,9 @@ def set_tracking(on):
 
 def process(jpg, ts=None):
     """Apply the view flips and, if a target is armed, find it, aim, and draw. Returns (JPEG, found flag)."""
+    now = time.time() if ts is None else ts
     if not (view["mirror"] or view["vflip"] or tracker.armed):
+        engage.update(now, False, False, False)
         return jpg, False                # nothing to change: the Pi's JPEG goes straight to the browser
     frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
     if view["mirror"] or view["vflip"]:
@@ -80,7 +90,7 @@ def process(jpg, ts=None):
             cv2.rectangle(frame, (int(cx - fw / 2), int(cy - fh / 2)), (int(cx + fw / 2), int(cy + fh / 2)), (0, 255, 0), 2)
             ax, ay = cx, cy                    # the point to aim at: the target, or where it is heading
             if cfg["lead_ms"] > 0:
-                ax, ay = predictor.update(time.time() if ts is None else ts, cx, cy, cfg["lead_ms"] / 1000, (w, h))
+                ax, ay = predictor.update(now, cx, cy, cfg["lead_ms"] / 1000, (w, h))
                 cv2.circle(frame, (int(ax), int(ay)), 6, (0, 255, 255), -1)
             else:
                 predictor.reset()
@@ -88,9 +98,20 @@ def process(jpg, ts=None):
                 with ctl_lock:
                     if ctl["tracking"]:
                         ctl["angles"] = ctl["aimer"].update((ax - w / 2) / (w / 2), (ay - h / 2) / (h / 2))
+                        info["settled"] = ctl["aimer"].settled
             except Exception as e:
                 with ctl_lock:
                     ctl["tracking"], ctl["error"] = False, f"gimbal: {e}"
+            info["speed"] = math.hypot(*predictor.velocity)
+    if not found:
+        info.update(speed=0.0, settled=False)
+        if ctl["aimer"]:
+            ctl["aimer"].reset()
+    tracking = ctl["tracking"] and tracker.armed
+    _, scan_goal = engage.update(now, tracking, found, info["settled"], info["speed"])
+    if scan_goal and tracking and ctl["aimer"]:      # auto-scan: sweep while searching
+        with ctl_lock:
+            ctl["angles"] = ctl["aimer"].gimbal.move_to(*scan_goal)
     return cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tobytes(), found
 
 
@@ -106,7 +127,11 @@ def capture_loop():
         seq, ts, jpg = item
         last_frame = time.time()
         age_ms = (last_frame - ts) * 1000     # how long the frame waited before we got to it
+        t_proc = time.perf_counter()
         jpg, found = process(jpg, ts)
+        proc_ms = (time.perf_counter() - t_proc) * 1000
+        pan, tilt = ctl["angles"] or (None, None)
+        telemetry.add(ts, age_ms=age_ms, proc_ms=proc_ms, pan=pan, tilt=tilt, speed=info["speed"])
         arrivals = [a for a in arrivals + [ts] if ts - a < 3]
         fps = (len(arrivals) - 1) / (arrivals[-1] - arrivals[0]) if len(arrivals) > 1 else 0
         count += 1
@@ -116,7 +141,9 @@ def capture_loop():
                  "error": ctl["error"] or (aimer.gimbal.error if aimer else None),
                  "angles": ctl["angles"], "sign": aimer.sign if aimer else None,
                  "mode": aimer.mode if aimer else "map", "view": dict(view),
-                 "dropped": feed.dropped, "age_ms": round(age_ms), "cfg": dict(cfg)}
+                 "dropped": feed.dropped, "age_ms": round(age_ms), "cfg": dict(cfg),
+                 "engage": {"state": engage.state, "armed": engage.armed, "auto_scan": engage.auto_scan,
+                            "shots": engage.shots, "max_shots": engage.max_shots}}
         with new_frame:
             latest.update(jpg=jpg, seq=count, state=state)
             new_frame.notify_all()
@@ -138,6 +165,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(PAGE, "text/html; charset=utf-8")
         elif self.path == "/state":
             self._send(json.dumps(latest["state"]).encode())
+        elif self.path == "/telemetry":
+            snap, now = telemetry.snapshot(), time.time()
+            snap["events"] = [[round(now - t, 1), text] for t, text in list(engage.events)[-14:]]
+            rtt = list(ctl["aimer"].gimbal.rtt_ms) if ctl["aimer"] else []
+            snap["servo_rtt_ms"] = round(statistics.median(rtt), 1) if rtt else None
+            self._send(json.dumps(snap).encode())
         elif self.path.startswith("/frame.jpg"):
             self._frame()
         elif self.path.startswith("/stream"):
@@ -195,6 +228,12 @@ class Handler(BaseHTTPRequestHandler):
             view[q["key"][0]] = q.get("on", ["0"])[0] == "1"
             tracker.last = None          # the picture just changed orientation: forget the old position
             predictor.reset()
+            return self._send(b"{}")
+        if url.path == "/arm":
+            engage.arm(q.get("on", ["0"])[0] == "1", time.time())
+            return self._send(b"{}")
+        if url.path == "/autoscan":
+            engage.auto_scan = q.get("on", ["0"])[0] == "1"
             return self._send(b"{}")
         if url.path == "/cfg" and "lead_ms" in q:
             cfg["lead_ms"] = max(0, min(800, int(float(q["lead_ms"][0]))))

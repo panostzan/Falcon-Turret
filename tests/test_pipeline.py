@@ -11,6 +11,7 @@ import cv2           # noqa: E402
 import numpy as np   # noqa: E402
 import app           # noqa: E402  (importing starts nothing: the server only runs under __main__)
 from aim import Aimer           # noqa: E402
+from engage import Engagement   # noqa: E402
 from gimbal import AsyncGimbal  # noqa: E402
 from test_gimbal import FakeESP  # noqa: E402
 
@@ -71,7 +72,63 @@ def test_moving():
     print(f"moving target: aim {plain_x:.0f} px without lead, {lead_x:.0f} px with lead (box at {box_x})")
 
 
+def test_engagement():
+    """Target appears -> LOCK; fires only when armed; target vanishes -> SEARCH; auto-scan sweeps; tracking off -> IDLE."""
+    esp = FakeESP()
+    gimbal = AsyncGimbal(link=esp)
+    app.tracker.use_preset("teal")
+    app.predictor.reset()
+    app.ctl.update(aimer=Aimer(gimbal), tracking=True, error=None)
+    app.ctl["aimer"].sign.update(app.DEFAULT_SIGNS)
+    app.view.update(mirror=False, vflip=False, mask=False)
+    app.cfg["lead_ms"] = 250
+    app.engage = Engagement()
+    box, blank = frame_with_box(400, 240), cv2.imencode(".jpg", np.full((480, 640, 3), 90, np.uint8))[1].tobytes()
+
+    i = 0
+    for _ in range(40):                                   # ~2.7 s of a steady target, disarmed
+        app.process(box, i / 15)
+        i += 1
+    assert app.engage.state == "LOCK", app.engage.state
+    assert app.engage.emitter.shots == [] and app.engage.shots == 0, "must not fire while disarmed"
+
+    app.engage.arm(True, i / 15)
+    for _ in range(60):                                   # armed: fires (simulated emitter), then respects the cooldown
+        app.process(box, i / 15)
+        i += 1
+    shots = app.engage.emitter.shots
+    assert len(shots) >= 1 and app.engage.shots == len(shots), shots
+    assert all(b - a >= app.engage.cooldown_s for a, b in zip(shots, shots[1:])), shots
+
+    for _ in range(30):                                   # the target disappears: SEARCH, no more shots
+        app.process(blank, i / 15)
+        i += 1
+    n = len(app.engage.emitter.shots)
+    assert app.engage.state == "SEARCH"
+    for _ in range(30):
+        app.process(blank, i / 15)
+        i += 1
+    assert len(app.engage.emitter.shots) == n, "no shots while the target is gone"
+
+    app.engage.auto_scan = True                           # auto-scan: sweeps the pan within the scan range
+    seen = []
+    for _ in range(120):
+        app.process(blank, i / 15)
+        i += 1
+        time.sleep(0.01)
+        seen.append(esp.pan)
+    assert 50 <= min(seen) and max(seen) <= 130 and max(seen) - min(seen) >= 40, (min(seen), max(seen))
+
+    app.set_tracking(False)                               # tracking off: disarmed and idle
+    app.process(box, i / 15)
+    assert app.engage.state == "IDLE" and not app.engage.armed
+    time.sleep(0.3)
+    gimbal.close()
+    print("engagement pipeline test passed (state machine, interlocks, auto-scan)")
+
+
 def test():
+    test_engagement()
     test_moving()
     # mirrored picture: a box at source x=480 appears at x=160 (left of center) -> pan below 90
     pan, tilt, ms, _ = run(480, 360)
