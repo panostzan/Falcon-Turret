@@ -2,6 +2,7 @@
 Run: python tests/test_gimbal.py"""
 import os
 import sys
+os.environ.setdefault("TURRET_LIMITS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "limits_full.json"))
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "laptop"))
 from gimbal import Gimbal, GimbalError   # noqa: E402
@@ -18,7 +19,7 @@ class FakeESP:
         self.log.append(cmd)
         if cmd == "C":
             self.pan, self.tilt = 90, 135
-        elif cmd == "S":
+        elif cmd in ("S", "D", "A"):          # status / release / resume: no angle change
             pass
         elif cmd[:1] in "PT" and len(cmd) > 1 and cmd[1:].isdigit() and len(cmd) <= 4:
             v = int(cmd[1:])
