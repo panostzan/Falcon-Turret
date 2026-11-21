@@ -88,7 +88,7 @@ class FrameFeed:
     def get(self, last_seq, timeout=2.0):
         """Block until a frame newer than last_seq exists; return (seq, arrival time, jpeg) or None."""
         with self._cv:
-            if not self._cv.wait_for(lambda: self._seq != last_seq, timeout):
+            if not self._cv.wait_for(lambda: self._latest is not None and self._seq != last_seq, timeout):
                 return None
             self._consumed = self._seq
             return (self._seq, *self._latest)

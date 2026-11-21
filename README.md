@@ -52,8 +52,8 @@ The true delay has not been measured on the hardware yet: use `tools/latency_tes
   queued). The dashboard shows how long each frame waited and how many were dropped.
 - `gimbal.AsyncGimbal` sends servo commands from a background thread (latest angle per axis wins), so the ESP's ~40 ms per
   move never blocks the video loop. Measured laptop processing (decode, flip, track, aim, encode): about 3 ms per frame.
-- Open question: every P/T command takes exactly 40 ms for the ESP to answer (status takes 5 ms), even sending the pulse
-  width directly. Not yet explained; it caps the ESP at about 25 moves per second.
+- Resolved: P/T commands used to take exactly 40 ms for the ESP to answer (status took 5 ms), even when sending the pulse
+  width directly. After the gimbal was rewired they take 4-5 ms, so the delay was electrical (wiring/power), not firmware.
 
 ## Hardware notes
 - ESP32 commands: `P<0-180>` pan (GPIO 19), `T<90-180>` tilt (GPIO 18), `C` center (90/135), `S` status. Servos need their

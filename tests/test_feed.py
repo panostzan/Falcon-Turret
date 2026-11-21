@@ -7,7 +7,25 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "laptop"))
 import receiver   # noqa: E402
 
 
+def test_slow_start():
+    """Asking for a frame before the first one has arrived must wait for it, not return garbage or crash."""
+    def slow_stream(quality):
+        time.sleep(0.4)                       # the Pi takes a while to start streaming
+        yield time.time(), b"first"
+        time.sleep(10)
+    receiver.jpeg_frames = slow_stream
+    feed = receiver.FrameFeed()
+    t0 = time.time()
+    assert feed.get(-1, timeout=0.1) is None, "no frame yet: must time out cleanly"
+    item = feed.get(-1, timeout=3)
+    assert item is not None and item[2] == b"first", item
+    assert time.time() - t0 >= 0.35, "should have waited for the stream to start"
+    assert feed.get(item[0], timeout=0.1) is None, "no newer frame than the one just taken"
+    print("slow-start feed test passed")
+
+
 def test():
+    test_slow_start()
     def fake_stream(quality):                 # 100 frames at ~100 fps, numbered 0..99
         for i in range(100):
             yield time.time(), str(i).encode()
