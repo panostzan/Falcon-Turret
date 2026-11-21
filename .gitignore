@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+# compiled ESP firmware and test captures (large / regenerable / personal)
+esp/build/
+esp/build_diag/
+esp/**/build/
+captures/
+# holds the hotspot password: copy wifi_config.example.h to wifi_config.h and fill it in
+esp/gimbal_wifi/wifi_config.h

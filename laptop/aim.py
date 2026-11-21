@@ -1,0 +1,95 @@
+"""Turns the target's position in the image into gimbal angles.
+
+Two modes:
+  map     The camera stays still and the turret points where the target is. The picture is mapped
+          linearly onto the servos' travel: left edge -> pan 0, center -> 90, right edge -> 180 (and
+          top edge -> tilt 90, center -> 135, bottom edge -> 180). The gimbal goes straight to that angle
+          and stays there. No accumulation: same target position -> same angle.
+  follow  The camera is mounted ON the gimbal. Each update turns the gimbal a fraction of the remaining
+          error until the target is centered.
+"""
+import math
+
+from gimbal import CENTER, PAN_RANGE, TILT_RANGE
+
+# Logitech C270: 60 degree diagonal field of view, 4:3 picture.
+DIAGONAL_FOV = 60.0
+_TAN_HALF_DIAG = math.tan(math.radians(DIAGONAL_FOV / 2))
+H_FOV = 2 * math.degrees(math.atan(_TAN_HALF_DIAG * 4 / 5))   # about 49.6 degrees
+V_FOV = 2 * math.degrees(math.atan(_TAN_HALF_DIAG * 3 / 5))   # about 38.2 degrees
+
+
+def pixel_error_to_degrees(err, fov):
+    """err is the target's offset from the image center as a fraction of the half-frame (-1..1).
+    Returns the angle between the camera's axis and the target, in degrees (pinhole camera model)."""
+    return math.degrees(math.atan(err * math.tan(math.radians(fov / 2))))
+
+
+def clamp(value, lo_hi):
+    return max(lo_hi[0], min(lo_hi[1], value))
+
+
+class Aimer:
+    """errors ex, ey are -1..1 (+x = target right of center, +y = below center).
+
+    All resulting angles are clamped to the servo ranges (pan 0-180, tilt 90-180). `sign` flips an axis
+    whose servo turns the opposite way. Errors smaller than `deadband` degrees are ignored.
+
+    map mode:    gimbal angle = center angle + sign * offset * (span / 2), where offset is the target's
+                 position across the picture (-1..1) and `span` is the servo travel the whole picture
+                 covers (pan 180, tilt 90 by default: the full range). Lightly smoothed (`smooth`:
+                 weight of the newest reading) so it doesn't jitter.
+    follow mode: each update turns the gimbal by `gain` times the remaining angle error, at most
+                 `max_step` degrees. The picture arrives a few frames late, so gains above ~0.3 oscillate.
+    """
+
+    def __init__(self, gimbal, mode="map", gain=(0.2, 0.2), deadband=1.0, max_step=8.0, smooth=0.5,
+                 map_deadband=0.5, span=(PAN_RANGE[1] - PAN_RANGE[0], TILT_RANGE[1] - TILT_RANGE[0])):
+        self.gimbal = gimbal
+        self.mode = mode
+        self.gain = {"pan": gain[0], "tilt": gain[1]}
+        self.sign = {"pan": 1, "tilt": 1}
+        self.deadband = deadband
+        self.max_step = max_step
+        self.smooth = smooth
+        self.span = {"pan": span[0], "tilt": span[1]}   # servo degrees covered by the full picture width/height
+        self.map_deadband = map_deadband   # servos move in whole degrees, so half a degree is the finest useful
+        self._goal = None            # smoothed map-mode target (pan, tilt)
+
+    def set_mode(self, mode):
+        if mode not in ("map", "follow"):
+            raise ValueError(mode)
+        self.mode, self._goal = mode, None
+
+    def update(self, ex, ey):
+        """Aim at the target; returns the gimbal's (pan, tilt) afterwards."""
+        return self._map(ex, ey) if self.mode == "map" else self._follow(ex, ey)
+
+    def _map(self, ex, ey):
+        goal = (CENTER[0] + self.sign["pan"] * ex * self.span["pan"] / 2,
+                CENTER[1] + self.sign["tilt"] * ey * self.span["tilt"] / 2)
+        if self._goal is None:
+            self._goal = goal
+        else:
+            self._goal = tuple(self.smooth * g + (1 - self.smooth) * old for g, old in zip(goal, self._goal))
+        pan, tilt = (clamp(self._goal[0], PAN_RANGE), clamp(self._goal[1], TILT_RANGE))
+        # only command an axis once it is off by more than the deadband, so a still target means a still servo
+        new_pan = pan if abs(pan - self.gimbal.pan) >= self.map_deadband else None
+        new_tilt = tilt if abs(tilt - self.gimbal.tilt) >= self.map_deadband else None
+        return self.gimbal.move_to(pan=new_pan, tilt=new_tilt)
+
+    def _follow_step(self, axis, err, fov):
+        degrees = pixel_error_to_degrees(err, fov)
+        if abs(degrees) < self.deadband:
+            return 0.0
+        step = self.sign[axis] * self.gain[axis] * degrees
+        return max(-self.max_step, min(self.max_step, step))
+
+    def _follow(self, ex, ey):
+        pan = clamp(self.gimbal.pan + self._follow_step("pan", ex, H_FOV), PAN_RANGE)
+        tilt = clamp(self.gimbal.tilt + self._follow_step("tilt", ey, V_FOV), TILT_RANGE)
+        return self.gimbal.move_to(pan=pan, tilt=tilt)
+
+    def flip(self, axis):
+        self.sign[axis] *= -1
+        return self.sign[axis]
