@@ -85,6 +85,7 @@
         <div class="row">
           <button id="mirror" aria-pressed="true">Mirror</button>
           <button id="vflip" aria-pressed="false">Flip vertical</button>
+          <button id="smooth" aria-pressed="true" title="Glides between depth results, averages flicker, follows camera motion">Smooth depth</button>
         </div>
         <label>Confidence needed to lock and fire: <b id="needv">80%</b>
           <input id="need" type="range" min="50" max="100" step="5" value="80"></label>
@@ -181,6 +182,7 @@ $('flip-pan').onclick = () => api.post('/flip?axis=pan');
 $('flip-tilt').onclick = () => api.post('/flip?axis=tilt');
 $('center').onclick = () => api.post('/center');
 $('mirror').onclick = () => setView('mirror', !(S && S.view && S.view.mirror));
+$('smooth').onclick = () => setView('smooth', !(S && S.view && S.view.smooth));
 $('vflip').onclick = () => setView('vflip', !(S && S.view && S.view.vflip));
 $('need').oninput = e => { $('needv').textContent = e.target.value + '%'; };
 $('need').onchange = e => api.post('/cfg?min_conf=' + e.target.value);
@@ -196,7 +198,7 @@ function render(s) {
   if (!s) return;
   const v = s.view || {}, e = s.engage || {};
   for (const l of LAYERS) pressed($('layer-' + l.key), v[l.key]);
-  pressed($('mirror'), v.mirror); pressed($('vflip'), v.vflip);
+  pressed($('mirror'), v.mirror); pressed($('vflip'), v.vflip); pressed($('smooth'), v.smooth);
   pressed($('m-map'), s.mode === 'map'); pressed($('m-follow'), s.mode === 'follow');
   pressed($('scan'), e.auto_scan);
 

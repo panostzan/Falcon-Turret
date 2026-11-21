@@ -54,12 +54,88 @@ def overlay(frame_bgr, depth01, alpha=0.55):
     return out
 
 
+THUMB = (80, 60)
+_WINDOW = cv2.createHanningWindow(THUMB, cv2.CV_32F)     # fades the picture edges out so they do not fool the shift measurement
+
+
+def thumbnail(bgr):
+    """A tiny float grey copy of a picture, used only to measure how far the scene moved between two moments."""
+    return cv2.resize(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY), THUMB, interpolation=cv2.INTER_AREA).astype(np.float32)
+
+
+def smoothstep(x):
+    x = min(1.0, max(0.0, x))
+    return x * x * (3 - 2 * x)
+
+
+class DepthSmoother:
+    """Makes a slow depth stream (about 7 results a second) look smooth on a faster video, with three display tricks.
+    None of them makes the depth more accurate or newer; they only change how it is shown.
+      1. Cross-fade: when a new result arrives, glide from what is on screen to the new map over about one result
+         interval, instead of stepping. (Costs about one interval of extra lag on the depth layer.)
+      2. Temporal averaging: each new map is blended with the previous one, which removes frame-to-frame flicker.
+      3. Motion compensation: the stored map is shifted by the scene's measured movement since it was computed
+         (phase correlation on tiny grey copies), so it stays stuck to the scene while the camera pans.
+    """
+
+    KEEP = 0.45          # share of the previous map kept when averaging a new one in
+    MAX_SHIFT = 12.0     # thumbnail pixels; a bigger apparent move is not trusted (a cut, or a person walking by)
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.target = self.shown_from = None      # depth maps (the new one, and what was on screen when it arrived)
+        self.src = None                           # thumbnail of the picture `target` was computed from
+        self.t_new = None
+        self.interval = 0.15                      # running estimate of the time between results
+        self.done = None
+
+    def update(self, depth, done, thumb, now):
+        """Feed a result. Ignored if it is not new."""
+        if self.done == done:
+            return
+        if self.target is None:
+            self.target = self.shown_from = depth.copy()
+        else:
+            self.shown_from = self.current(now, thumb)            # start the fade from exactly what is on screen now
+            self.target = self.KEEP * self.target + (1 - self.KEEP) * depth
+            if self.done is not None:
+                self.interval = min(0.4, max(0.08, 0.7 * self.interval + 0.3 * (done - self.done)))
+        self.src, self.done, self.t_new = thumb, done, now
+
+    def _shift(self, thumb):
+        """How far (dx, dy in depth-map pixels) the scene moved between the picture behind the target and `thumb`."""
+        if self.src is None or thumb is None:
+            return 0.0, 0.0
+        (dx, dy), response = cv2.phaseCorrelate(self.src, thumb, _WINDOW)
+        if response < 0.15 or abs(dx) > self.MAX_SHIFT or abs(dy) > self.MAX_SHIFT:
+            return 0.0, 0.0
+        if abs(dx) < 0.3 and abs(dy) < 0.3:                     # measurement noise, not movement
+            return 0.0, 0.0
+        return dx, dy
+
+    def current(self, now, thumb=None):
+        """The depth map to show right now (the fade, then the motion compensation)."""
+        if self.target is None:
+            return None
+        k = smoothstep((now - self.t_new) / self.interval)
+        d = self.shown_from * (1 - k) + self.target * k if k < 1.0 else self.target
+        dx, dy = self._shift(thumb)
+        if dx or dy:
+            h, w = d.shape[:2]
+            m = np.float32([[1, 0, dx * w / THUMB[0]], [0, 1, dy * h / THUMB[1]]])
+            d = cv2.warpAffine(d, m, (w, h), borderMode=cv2.BORDER_REPLICATE)
+        return d
+
+
 class NeuralDepth:
     def __init__(self, model_path=DEFAULT_MODEL, size=SIZE, threads=6):
         self.size, self.error, self.ms, self.fps = size, None, 0.0, 0.0
         self._session = None
         self._range = None
         self._latest = None                       # (normalized map, time finished)
+        self._thumb = None                        # tiny grey copy of the picture that result came from
         self._pending = None
         self._cv = threading.Condition()
         self._stop = False
@@ -100,6 +176,11 @@ class NeuralDepth:
             depth, done = self._latest
         return depth, time.time() - done
 
+    def latest_full(self):
+        """(depth, time finished, thumbnail of the picture it came from) or None. For the smoother."""
+        with self._cv:
+            return None if self._latest is None else (self._latest[0], self._latest[1], self._thumb)
+
     def _run(self):
         last = time.time()
         while True:
@@ -109,6 +190,7 @@ class NeuralDepth:
                     return
                 frame, self._pending = self._pending, None
             t = time.perf_counter()
+            thumb = thumbnail(frame)
             try:
                 depth, self._range = normalize(self.run_once(frame), self._range)
             except Exception as e:
@@ -120,6 +202,7 @@ class NeuralDepth:
             last = now
             with self._cv:
                 self._latest = (depth, now)
+                self._thumb = thumb
 
     def stats(self):
         return {"available": self.available, "error": self.error, "ms": round(self.ms), "fps": round(self.fps, 1)}

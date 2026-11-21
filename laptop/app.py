@@ -27,7 +27,7 @@ from gimbal import AsyncGimbal     # noqa: E402
 from predict import LeadPredictor  # noqa: E402
 from receiver import CameraFeed, FrameFeed   # noqa: E402
 from telemetry import Telemetry    # noqa: E402
-from depth_nn import NeuralDepth, overlay as depth_overlay   # noqa: E402  (loads onnxruntime only when the layer is first switched on)
+from depth_nn import DepthSmoother, NeuralDepth, thumbnail, overlay as depth_overlay   # noqa: E402  (loads onnxruntime only when the layer is first switched on)
 from tracker import PRESETS, ColorTracker, LastSeen   # noqa: E402
 
 # "COM7" for USB serial, or e.g. "udp:192.168.137.50" for the Wi-Fi firmware. Override: set GIMBAL=udp:...
@@ -49,7 +49,7 @@ tracker = ColorTracker()
 # This turret's servo directions (+1 = angle grows as the target goes right / down in the picture). Tilt is -1: tested
 # on the real turret, the other way pointed the wrong direction. The dashboard's Flip buttons change these live.
 DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
-view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False}   # flip the picture so it matches the real world (set from the dashboard)
+view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False, "smooth": True}   # flip the picture so it matches the real world (set from the dashboard)
 cfg = {"lead_ms": 0, "min_conf": 80}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
                                      # to about the measured camera-to-servo delay, using the dashboard slider)
 predictor = LeadPredictor()
@@ -78,7 +78,7 @@ def set_tracking(on):
         return ctl["error"]
 
 
-depth_state = {"net": None, "error": None}     # the neural depth layer (off by default)
+depth_state = {"net": None, "error": None, "smoother": DepthSmoother()}     # the neural depth layer (off by default)
 last_seen = LastSeen()                         # last confirmed position, for the ghost and the search status
 trail = deque(maxlen=45)                       # recent target positions, for the Trail layer
 trail_seen = [0.0]                             # when the target was last seen (the trail clears after a second without it)
@@ -97,8 +97,15 @@ def apply_depth(frame):
         return frame
     depth_state["error"] = None
     net.submit(frame)
-    result = net.latest()
-    return depth_overlay(frame, result[0]) if result else frame
+    if not view["smooth"]:                                      # raw: the newest result as it is (steps at the network's rate)
+        result = net.latest()
+        return depth_overlay(frame, result[0]) if result else frame
+    full = net.latest_full()
+    if not full:
+        return frame
+    sm, now, thumb = depth_state["smoother"], time.time(), thumbnail(frame)
+    sm.update(full[0], full[1], full[2], now)
+    return depth_overlay(frame, sm.current(now, thumb))
 
 
 LIME, AMBER = (58, 226, 182), (0, 176, 255)     # BGR
@@ -390,6 +397,7 @@ class Handler(BaseHTTPRequestHandler):
                 predictor.reset()
                 trail.clear()
                 last_seen.reset()
+                depth_state["smoother"].reset()
             return self._send(b"{}")
         if url.path == "/arm":
             engage.arm(q.get("on", ["0"])[0] == "1", time.time())
