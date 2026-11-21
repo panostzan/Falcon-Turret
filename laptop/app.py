@@ -4,6 +4,7 @@ Relays the Pi's JPEG frames to the browser. Click a target in the video to lock 
 When tracking is switched on from the dashboard the server also follows the clicked target and nudges the gimbal (ESP32 on COM7) to center it. Tracking starts OFF.
 Binds to localhost only.
 """
+import ctypes
 import json
 import math
 import os
@@ -11,6 +12,7 @@ import statistics
 import sys
 import threading
 import time
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -33,7 +35,11 @@ GIMBAL_PORT = os.environ.get("GIMBAL", "COM7")
 # Video source: the Pi by default. `python laptop/app.py --camera 1` (or CAMERA=1) uses a USB webcam on this laptop instead.
 CAMERA = (int(sys.argv[sys.argv.index("--camera") + 1]) if "--camera" in sys.argv
           else int(os.environ["CAMERA"]) if os.environ.get("CAMERA", "").isdigit() else None)
-PAGE = open(os.path.join(HERE, "dashboard.html"), encoding="utf-8").read().encode()
+CLASSIC = open(os.path.join(HERE, "dashboard.html"), encoding="utf-8").read().encode()   # the previous dashboard, at /classic
+# The pages and assets of the current dashboard (laptop/ui/). Only these names are served, so no other file can be read.
+UI_FILES = {"/": ("live.html", "text/html; charset=utf-8"), "/diagnostics": ("diagnostics.html", "text/html; charset=utf-8"),
+            "/ui.css": ("ui.css", "text/css; charset=utf-8"), "/ui.js": ("ui.js", "application/javascript; charset=utf-8")}
+STARTED = time.time()
 BOOT = time.time()                  # lets the page detect a server restart and reconnect its video
 
 new_frame = threading.Condition()   # notified whenever `latest` changes
@@ -43,7 +49,7 @@ tracker = ColorTracker()
 # This turret's servo directions (+1 = angle grows as the target goes right / down in the picture). Tilt is -1: tested
 # on the real turret, the other way pointed the wrong direction. The dashboard's Flip buttons change these live.
 DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
-view = {"mirror": True, "vflip": False, "mask": False, "depth": False}   # flip the picture so it matches the real world (set from the dashboard)
+view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False}   # flip the picture so it matches the real world (set from the dashboard)
 cfg = {"lead_ms": 0}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
                                      # to about the measured camera-to-servo delay, using the dashboard slider)
 predictor = LeadPredictor()
@@ -73,6 +79,8 @@ def set_tracking(on):
 
 
 depth_state = {"net": None, "error": None}     # the neural depth layer (off by default)
+trail = deque(maxlen=45)                       # recent target positions, for the Trail layer
+trail_seen = [0.0]                             # when the target was last seen (the trail clears after a second without it)
 
 
 def apply_depth(frame):
@@ -109,15 +117,20 @@ def process(jpg, ts=None):
         if view["mask"] and tracker.debug_mask is not None:   # tint every pixel the color filter accepts
             hit = cv2.resize(tracker.debug_mask, (w, h), interpolation=cv2.INTER_NEAREST) > 0
             frame[hit] = (0.4 * frame[hit] + 0.6 * np.array((255, 0, 255))).astype(np.uint8)
-        cv2.drawMarker(frame, (w // 2, h // 2), (255, 255, 255), cv2.MARKER_CROSS, 20, 1)
+        if view["box"]:
+            cv2.drawMarker(frame, (w // 2, h // 2), (255, 255, 255), cv2.MARKER_CROSS, 20, 1)
         if face:
             found = True
             cx, cy, fw, fh = face
-            cv2.rectangle(frame, (int(cx - fw / 2), int(cy - fh / 2)), (int(cx + fw / 2), int(cy + fh / 2)), (0, 255, 0), 2)
+            trail.append((int(cx), int(cy)))
+            trail_seen[0] = now
+            if view["box"]:
+                cv2.rectangle(frame, (int(cx - fw / 2), int(cy - fh / 2)), (int(cx + fw / 2), int(cy + fh / 2)), (0, 255, 0), 2)
             ax, ay = cx, cy                    # the point to aim at: the target, or where it is heading
             if cfg["lead_ms"] > 0:
                 ax, ay = predictor.update(now, cx, cy, cfg["lead_ms"] / 1000, (w, h))
-                cv2.circle(frame, (int(ax), int(ay)), 6, (0, 255, 255), -1)
+                if view["box"]:
+                    cv2.circle(frame, (int(ax), int(ay)), 6, (0, 255, 255), -1)
             else:
                 predictor.reset()
             try:
@@ -129,6 +142,13 @@ def process(jpg, ts=None):
                 with ctl_lock:
                     ctl["tracking"], ctl["error"] = False, f"gimbal: {e}"
             info["speed"] = math.hypot(*predictor.velocity)
+    if not found and trail and now - trail_seen[0] > 1.0:
+        trail.clear()
+    if view["trail"] and len(trail) > 1:           # older points are thinner and dimmer
+        pts = list(trail)
+        for i in range(1, len(pts)):
+            k = i / len(pts)
+            cv2.line(frame, pts[i - 1], pts[i], (int(60 + 195 * k), int(180 + 60 * k), int(40 + 120 * k)), 1 + int(3 * k), cv2.LINE_AA)
     if not found:
         info.update(speed=0.0, settled=False)
         if ctl["aimer"]:
@@ -167,6 +187,7 @@ def capture_loop():
                  "error": ctl["error"] or (aimer.gimbal.error if aimer else None),
                  "angles": ctl["angles"], "sign": aimer.sign if aimer else None,
                  "mode": aimer.mode if aimer else "map", "view": dict(view),
+                 "source": f"webcam {CAMERA}" if CAMERA is not None else "Pi",
                  "depth": depth_state["net"].stats() if depth_state["net"] else None, "depth_error": depth_state["error"],
                  "dropped": feed.dropped, "age_ms": round(age_ms), "cfg": dict(cfg),
                  "engage": {"state": engage.state, "armed": engage.armed, "auto_scan": engage.auto_scan,
@@ -174,6 +195,42 @@ def capture_loop():
         with new_frame:
             latest.update(jpg=jpg, seq=count, state=state)
             new_frame.notify_all()
+
+
+_cpu_mark = {"wall": time.time(), "cpu": time.process_time()}
+
+
+def system_stats():
+    """Memory and CPU use for the diagnostics page (Windows). Any value that cannot be read is None."""
+    out = {"uptime_s": round(time.time() - STARTED), "ram_free_gb": None, "ram_total_gb": None, "process_mb": None,
+           "cpu_process_pct": None, "python": sys.version.split()[0]}
+    now, cpu = time.time(), time.process_time()
+    if now > _cpu_mark["wall"]:
+        out["cpu_process_pct"] = round(100 * (cpu - _cpu_mark["cpu"]) / (now - _cpu_mark["wall"]) / (os.cpu_count() or 1), 1)
+    _cpu_mark.update(wall=now, cpu=cpu)
+    try:
+        class MemStatus(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong), ("total", ctypes.c_ulonglong),
+                        ("avail", ctypes.c_ulonglong), ("tpage", ctypes.c_ulonglong), ("apage", ctypes.c_ulonglong),
+                        ("tvirt", ctypes.c_ulonglong), ("avirt", ctypes.c_ulonglong), ("ext", ctypes.c_ulonglong)]
+        m = MemStatus()
+        m.length = ctypes.sizeof(MemStatus)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+        out["ram_free_gb"], out["ram_total_gb"] = round(m.avail / 2**30, 1), round(m.total / 2**30, 1)
+
+        class ProcMem(ctypes.Structure):
+            _fields_ = [("cb", ctypes.c_ulong), ("faults", ctypes.c_ulong), ("peak", ctypes.c_size_t), ("ws", ctypes.c_size_t),
+                        ("a", ctypes.c_size_t), ("b", ctypes.c_size_t), ("c", ctypes.c_size_t), ("d", ctypes.c_size_t),
+                        ("e", ctypes.c_size_t), ("f", ctypes.c_size_t)]
+        p = ProcMem()
+        p.cb = ctypes.sizeof(ProcMem)
+        fn = ctypes.windll.psapi.GetProcessMemoryInfo
+        fn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong]
+        fn(ctypes.c_void_p(-1), ctypes.byref(p), p.cb)     # -1 = this process
+        out["process_mb"] = round(p.ws / 2**20)
+    except (AttributeError, OSError):
+        pass
+    return out
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -188,8 +245,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/":
-            self._send(PAGE, "text/html; charset=utf-8")
+        if self.path in UI_FILES:
+            name, ctype = UI_FILES[self.path]
+            try:
+                with open(os.path.join(HERE, "ui", name), "rb") as f:     # read on every request: edits show up on reload
+                    self._send(f.read(), ctype)
+            except OSError:
+                self._send(b"missing UI file: " + name.encode(), "text/plain", 500)
+        elif self.path == "/classic":
+            self._send(CLASSIC, "text/html; charset=utf-8")
+        elif self.path == "/system":
+            self._send(json.dumps(system_stats()).encode())
         elif self.path == "/state":
             self._send(json.dumps(latest["state"]).encode())
         elif self.path == "/telemetry":
@@ -253,8 +319,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(b"{}")
         if url.path == "/view" and q.get("key", [""])[0] in view:
             view[q["key"][0]] = q.get("on", ["0"])[0] == "1"
-            tracker.last = None          # the picture just changed orientation: forget the old position
-            predictor.reset()
+            if q["key"][0] in ("mirror", "vflip"):       # the picture just changed orientation: forget the old position
+                tracker.last = None
+                predictor.reset()
+                trail.clear()
             return self._send(b"{}")
         if url.path == "/arm":
             engage.arm(q.get("on", ["0"])[0] == "1", time.time())

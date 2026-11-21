@@ -26,8 +26,14 @@ def test():
         app.engage = Engagement()
         for i in range(30):                                       # some telemetry
             app.telemetry.add(i / 15, age_ms=40 + i, proc_ms=3.0, pan=90 + i, tilt=135, speed=10.0)
-        page = call(port, "/").decode()
-        assert "ARM" in page and "/telemetry" in page and "Mission" in page
+        classic = call(port, "/classic").decode()                 # the previous dashboard is still served
+        assert "ARM" in classic and "/telemetry" in classic and "Mission" in classic
+        live, diag = call(port, "/").decode(), call(port, "/diagnostics").decode()
+        assert "Mission" in live and "Hold to arm" in live and "/ui.js" in live
+        assert "/telemetry" in diag and "Event log" in diag
+        assert b"--teal" in call(port, "/ui.css") and b"function poll" in call(port, "/ui.js")
+        sysinfo = json.loads(call(port, "/system"))
+        assert sysinfo["uptime_s"] >= 0 and "python" in sysinfo
 
         t = json.loads(call(port, "/telemetry"))
         assert set(t["series"]) == {"interval_ms", "age_ms", "proc_ms", "pan", "tilt", "speed"}

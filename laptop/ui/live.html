@@ -1,0 +1,203 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turret</title>
+<link rel="stylesheet" href="/ui.css">
+
+<header class="top">
+  <div class="brand">Turret</div>
+  <nav class="tabs"><a href="/" aria-current="page">Live</a><a href="/diagnostics">Diagnostics</a></nav>
+  <div class="status"><span id="st-video">Connecting…</span><span id="st-gimbal"></span><span id="st-depth"></span></div>
+</header>
+
+<main class="layout">
+  <section>
+    <div class="stage">
+      <img id="video" alt="Live camera picture">
+      <div id="badge" class="badge">Connecting…</div>
+    </div>
+    <p class="hint" id="hint">Click the target in the picture to learn its color.</p>
+
+    <div class="layers" id="layers" role="group" aria-label="Layers"></div>
+    <div class="presets">Views
+      <button data-preset="tracking">Tracking</button>
+      <button data-preset="depth">Depth</button>
+      <button data-preset="clean">Clean</button>
+    </div>
+  </section>
+
+  <aside class="stack">
+    <div class="panel">
+      <h2>Target</h2>
+      <div class="row">
+        <button id="p-teal">Teal</button>
+        <button id="p-blue">Neon blue</button>
+        <button id="p-clear">Clear</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="track" class="primary">Start tracking</button>
+      </div>
+      <div class="err" id="err"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Mission</h2>
+      <ol class="stepper" id="stepper"></ol>
+      <div class="row">
+        <button id="arm" class="hold" title="Hold to arm">Hold to arm</button>
+        <button id="scan" aria-pressed="false">Auto-scan</button>
+      </div>
+      <p class="hint" id="shots">Shots 0 of 30 (simulated: no emitter yet)</p>
+    </div>
+
+    <div class="panel">
+      <h2>Aim</h2>
+      <div class="pair"><div><b id="pan">–</b><small>Pan, degrees</small></div><div><b id="tilt">–</b><small>Tilt, degrees</small></div></div>
+      <details>
+        <summary>Settings</summary>
+        <div class="row">
+          <button id="m-map" aria-pressed="true">Map</button><button id="m-follow" aria-pressed="false">Follow</button>
+          <small>Map: camera is fixed. Follow: camera is on the gimbal.</small>
+        </div>
+        <div class="row">
+          <button id="flip-pan">Flip pan <small id="sp"></small></button>
+          <button id="flip-tilt">Flip tilt <small id="stl"></small></button>
+          <button id="center">Center</button>
+        </div>
+        <div class="row">
+          <button id="mirror" aria-pressed="true">Mirror</button>
+          <button id="vflip" aria-pressed="false">Flip vertical</button>
+        </div>
+        <label>Look ahead of a moving target: <b id="leadv">0 ms</b>
+          <input id="lead" type="range" min="0" max="800" step="25" value="0"></label>
+      </details>
+      <p class="hint">Esc stops tracking and disarms.</p>
+    </div>
+  </aside>
+</main>
+
+<script src="/ui.js"></script>
+<script>
+const LAYERS = [
+  { key: 'box', name: 'Drone tracking', tag: 'measured' },
+  { key: 'trail', name: 'Trail', tag: 'measured' },
+  { key: 'mask', name: 'Color match', tag: 'measured' },
+  { key: 'depth', name: 'Depth', tag: 'estimated, relative' },
+];
+const PRESETS = {
+  tracking: { box: 1, trail: 1, mask: 0, depth: 0 },
+  depth: { box: 0, trail: 0, mask: 0, depth: 1 },
+  clean: { box: 0, trail: 0, mask: 0, depth: 0 },
+};
+const STEPS = ['SEARCH', 'ACQUIRE', 'TRACK', 'LOCK', 'COOLDOWN'];
+const STEP_LABEL = { SEARCH: 'Search', ACQUIRE: 'Acquire', TRACK: 'Track', LOCK: 'Lock', COOLDOWN: 'Cooldown' };
+let S = null;                      // the latest state from the server
+
+/* layer buttons */
+const layerBox = $('layers');
+for (const l of LAYERS) {
+  const b = document.createElement('button');
+  b.className = 'layer'; b.id = 'layer-' + l.key; b.setAttribute('aria-pressed', 'false');
+  b.innerHTML = `<b>${l.name}</b><span>${l.tag}</span>`;
+  b.onclick = () => setView(l.key, !(S && S.view && S.view[l.key]));
+  layerBox.appendChild(b);
+}
+const setView = (key, on) => api.post(`/view?key=${key}&on=${on ? 1 : 0}`);
+document.querySelectorAll('[data-preset]').forEach(b => b.onclick = async () => {
+  for (const [k, v] of Object.entries(PRESETS[b.dataset.preset])) await setView(k, v);
+});
+
+/* mission stepper */
+const stepper = $('stepper');
+for (const st of STEPS) { const li = document.createElement('li'); li.id = 'step-' + st; li.textContent = STEP_LABEL[st]; stepper.appendChild(li); }
+
+/* picture: one request per frame (nothing long-lived that can freeze) */
+const video = $('video');
+let seq = -1, shown = null;
+(async function pump() {
+  try {
+    const r = await fetch('/frame.jpg?after=' + seq, { cache: 'no-store' });
+    if (r.status === 200) {
+      seq = +r.headers.get('X-Seq');
+      const url = URL.createObjectURL(await r.blob()), old = shown; shown = url; video.src = url;
+      if (old) URL.revokeObjectURL(old);
+    }
+  } catch (e) { await new Promise(t => setTimeout(t, 500)); }
+  pump();
+})();
+video.onclick = async e => {
+  const r = video.getBoundingClientRect(), sx = video.naturalWidth / r.width, sy = video.naturalHeight / r.height;
+  // the picture is letterboxed with object-fit: contain, so map the click into the picture itself
+  const scale = Math.min(r.width / video.naturalWidth, r.height / video.naturalHeight);
+  const ox = (r.width - video.naturalWidth * scale) / 2, oy = (r.height - video.naturalHeight * scale) / 2;
+  const x = (e.clientX - r.left - ox) / scale, y = (e.clientY - r.top - oy) / scale;
+  if (x < 0 || y < 0 || x > video.naturalWidth || y > video.naturalHeight) return;
+  const res = await api.post(`/select?x=${x}&y=${y}`);
+  $('err').textContent = res.ok === false ? 'That spot is a wall or too big. Click directly on the target.' : '';
+};
+
+/* target and tracking */
+$('p-teal').onclick = () => api.post('/preset?name=teal');
+$('p-blue').onclick = () => api.post('/preset?name=neon%20blue');
+$('p-clear').onclick = () => api.post('/clear');
+$('track').onclick = async () => { const r = await api.post('/track?on=' + (S && S.tracking ? 0 : 1)); $('err').textContent = r.error || ''; };
+
+/* arming needs a deliberate hold; disarming is one click */
+const arm = $('arm'); let holdTimer = null, holdStart = 0, raf = 0;
+function holdFrame() { const p = Math.min(1, (performance.now() - holdStart) / 700); arm.style.setProperty('--p', p); if (p < 1) raf = requestAnimationFrame(holdFrame); }
+arm.onpointerdown = () => {
+  if (S && S.engage && S.engage.armed) { api.post('/arm?on=0'); return; }
+  holdStart = performance.now(); raf = requestAnimationFrame(holdFrame);
+  holdTimer = setTimeout(() => { api.post('/arm?on=1'); arm.style.setProperty('--p', 0); }, 700);
+};
+const cancelHold = () => { clearTimeout(holdTimer); cancelAnimationFrame(raf); arm.style.setProperty('--p', 0); };
+arm.onpointerup = arm.onpointerleave = cancelHold;
+$('scan').onclick = () => api.post('/autoscan?on=' + (S && S.engage && S.engage.auto_scan ? 0 : 1));
+
+/* settings */
+$('m-map').onclick = () => api.post('/mode?name=map');
+$('m-follow').onclick = () => api.post('/mode?name=follow');
+$('flip-pan').onclick = () => api.post('/flip?axis=pan');
+$('flip-tilt').onclick = () => api.post('/flip?axis=tilt');
+$('center').onclick = () => api.post('/center');
+$('mirror').onclick = () => setView('mirror', !(S && S.view && S.view.mirror));
+$('vflip').onclick = () => setView('vflip', !(S && S.view && S.view.vflip));
+$('lead').oninput = e => { $('leadv').textContent = e.target.value + ' ms'; };
+$('lead').onchange = e => api.post('/cfg?lead_ms=' + e.target.value);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { api.post('/track?on=0'); api.post('/arm?on=0'); } });
+
+const pressed = (el, on) => el.setAttribute('aria-pressed', on ? 'true' : 'false');
+const sgn = x => (x > 0 ? '(+)' : '(−)');
+
+function render(s) {
+  S = s; setStatus(s);
+  if (!s) return;
+  const v = s.view || {}, e = s.engage || {};
+  for (const l of LAYERS) pressed($('layer-' + l.key), v[l.key]);
+  pressed($('mirror'), v.mirror); pressed($('vflip'), v.vflip);
+  pressed($('m-map'), s.mode === 'map'); pressed($('m-follow'), s.mode === 'follow');
+  pressed($('scan'), e.auto_scan);
+
+  const badge = $('badge'); let text, cls = '';
+  if (!s.connected) text = 'No picture';
+  else if (!s.armed) text = 'Pick a target';
+  else if (!s.target) { text = 'Searching'; cls = 'warn'; }
+  else if (e.state === 'LOCK' || e.state === 'COOLDOWN') { text = 'Locked'; cls = 'good'; }
+  else { text = s.tracking ? 'Tracking' : 'Target found'; cls = 'good'; }
+  badge.textContent = text; badge.className = 'badge ' + cls;
+  $('hint').textContent = s.armed ? 'Click the picture to choose a different target.' : 'Click the target in the picture to learn its color, or pick Teal.';
+
+  const tb = $('track'); tb.textContent = s.tracking ? 'Stop tracking' : 'Start tracking'; tb.className = s.tracking ? 'danger' : 'primary';
+  $('err').textContent = s.error || s.depth_error || $('err').textContent;
+  if (!s.error && !s.depth_error && s.tracking) $('err').textContent = '';
+
+  for (const st of STEPS) { const li = $('step-' + st); li.className = e.state === st ? 'now' + (st === 'SEARCH' ? ' search' : '') : ''; }
+  arm.textContent = e.armed ? 'Armed: click to disarm' : 'Hold to arm'; arm.classList.toggle('armed', !!e.armed);
+  $('shots').textContent = `Shots ${e.shots || 0} of ${e.max_shots || 30} (simulated: no emitter yet)`;
+
+  $('pan').textContent = s.angles ? s.angles[0] : '–'; $('tilt').textContent = s.angles ? s.angles[1] : '–';
+  if (s.sign) { $('sp').textContent = sgn(s.sign.pan); $('stl').textContent = sgn(s.sign.tilt); }
+  if (s.cfg && document.activeElement !== $('lead')) { $('lead').value = s.cfg.lead_ms; $('leadv').textContent = s.cfg.lead_ms + ' ms'; }
+}
+poll('/state', 250, render);
+</script>

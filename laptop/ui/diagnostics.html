@@ -1,0 +1,101 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turret diagnostics</title>
+<link rel="stylesheet" href="/ui.css">
+
+<header class="top">
+  <div class="brand">Turret</div>
+  <nav class="tabs"><a href="/">Live</a><a href="/diagnostics" aria-current="page">Diagnostics</a></nav>
+  <div class="status"><span id="st-video">Connecting…</span><span id="st-gimbal"></span><span id="st-depth"></span></div>
+</header>
+
+<main class="stack">
+  <div class="grid2">
+    <section class="panel">
+      <h2>Links and sensors</h2>
+      <table id="links"></table>
+    </section>
+    <section class="panel">
+      <h2>This computer</h2>
+      <table id="sys"></table>
+    </section>
+  </div>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Picture timing</h2>
+      <canvas id="c-interval"></canvas>
+      <small>Gap between pictures, ms. Now <b id="v-interval">–</b>, 95% under <b id="v-interval95">–</b></small>
+      <canvas id="c-proc"></canvas>
+      <small>Processing per picture, ms. Now <b id="v-proc">–</b>, 95% under <b id="v-proc95">–</b></small>
+    </section>
+    <section class="panel">
+      <h2>Aim</h2>
+      <canvas id="c-aim"></canvas>
+      <small><span style="color:#2fb8a8">Pan</span> and <span style="color:#e0a030">tilt</span>, degrees</small>
+      <canvas id="c-speed"></canvas>
+      <small>Target speed, picture widths per second</small>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Event log</h2>
+    <div class="log" id="log"><small>No events yet.</small></div>
+  </section>
+</main>
+
+<script src="/ui.js"></script>
+<script>
+let S = null;
+const rows = (id, list) => {
+  $(id).innerHTML = list.map(([k, v, cls]) => `<tr><th>${k}</th><td class="${cls || ''}">${v}</td></tr>`).join('');
+};
+
+function renderState(s) {
+  S = s; setStatus(s);
+  if (!s) { rows('links', [['Server', 'Not reachable', 'bad']]); return; }
+  const d = s.depth;
+  rows('links', [
+    ['Video source', s.source || 'Pi', ''],
+    ['Video', s.connected ? `${s.fps} fps, ${s.kb} KB per picture` : 'No picture', s.connected ? 'ok' : 'bad'],
+    ['Pictures dropped', s.dropped, ''],
+    ['Gimbal', s.angles ? 'Connected' : (s.error || 'Not connected'), s.angles ? 'ok' : (s.error ? 'bad' : 'na')],
+    ['Depth layer', !s.view.depth ? 'Off' : d ? `${d.fps} fps, ${d.ms} ms per picture` : (s.depth_error || 'Loading'), s.view.depth ? (d ? 'ok' : 'warn') : 'na'],
+    ['Depth error', s.depth_error || 'None', s.depth_error ? 'bad' : 'na'],
+    ['Target color', s.armed ? 'Set' : 'Not set', s.armed ? 'ok' : 'na'],
+    ['Distance sensor', 'Not connected', 'na'],
+    ['IR emitter / receiver', 'Not connected', 'na'],
+  ]);
+}
+
+function renderSystem(x) {
+  if (!x) return;
+  const free = x.ram_free_gb;
+  rows('sys', [
+    ['Memory free', x.ram_free_gb == null ? '–' : `${x.ram_free_gb} of ${x.ram_total_gb} GB`, free != null && free < 1.5 ? 'warn' : ''],
+    ['Server memory', x.process_mb == null ? '–' : x.process_mb + ' MB', ''],
+    ['Server CPU', x.cpu_process_pct == null ? '–' : x.cpu_process_pct + '%', ''],
+    ['Uptime', Math.floor(x.uptime_s / 60) + ' min', ''],
+    ['Python', x.python, ''],
+  ]);
+}
+
+function renderTelemetry(t) {
+  if (!t) return;
+  const s = t.series, st = t.stats;
+  drawChart($('c-interval'), [{ v: s.interval_ms, color: '#2fb8a8' }]);
+  drawChart($('c-proc'), [{ v: s.proc_ms, color: '#2fb8a8' }]);
+  drawChart($('c-aim'), [{ v: s.pan, color: '#2fb8a8' }, { v: s.tilt, color: '#e0a030' }], [0, 180]);
+  drawChart($('c-speed'), [{ v: s.speed, color: '#2fb8a8' }]);
+  $('v-interval').textContent = fixed(last(s.interval_ms), 0); $('v-interval95').textContent = fixed(st.interval_ms.p95, 0);
+  $('v-proc').textContent = fixed(last(s.proc_ms), 1); $('v-proc95').textContent = fixed(st.proc_ms.p95, 1);
+  $('log').innerHTML = t.events.length
+    ? t.events.slice().reverse().map(([ago, text]) => `<div><span>${ago}s ago</span>${text}</div>`).join('')
+    : '<small>No events yet.</small>';
+}
+
+poll('/state', 500, renderState);
+poll('/system', 2000, renderSystem);
+poll('/telemetry', 1000, renderTelemetry);
+</script>
