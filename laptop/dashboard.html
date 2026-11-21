@@ -51,9 +51,9 @@ canvas{width:100%;height:90px;background:#0b0f14;border-radius:6px;display:block
    <button id="vv" class="off" onclick="toggleView('vflip')">Flip vertical</button>
    <button id="vk" class="off" onclick="toggleView('mask')">Show color match</button></div>
   <div class="card"><div class="k">Lead: aim ahead of a moving target</div>
-   <input id="lead" type="range" min="0" max="800" step="25" value="250" style="width:100%"
+   <input id="lead" type="range" min="0" max="800" step="25" value="0" style="width:100%"
     oninput="$('leadv').textContent=this.value+' ms'" onchange="post('/cfg?lead_ms='+this.value)">
-   <div class="v" id="leadv">250 ms</div></div>
+   <div class="v" id="leadv">0 ms</div></div>
   <div class="card"><div class="k">Aiming mode</div>
    <button id="mmap" onclick="setMode('map')">Map (camera fixed)</button>
    <button id="mfol" class="off" onclick="setMode('follow')">Follow (camera on gimbal)</button></div>

@@ -42,7 +42,8 @@ command round trip in ring buffers; the dashboard charts them live with p50/p95/
 
 ## Motion prediction
 `laptop/predict.py` keeps a smoothed position and velocity for the target (alpha-beta filter) and the turret aims
-`lead_ms` ahead of it (default 250 ms, about the camera-to-servo delay; slider on the dashboard; 0 turns it off). A yellow
+`lead_ms` ahead of it (slider on the dashboard; **off by default**: speed estimates are noisy and the lead turned pixel noise
+into servo jitter. Raise it only to about the measured camera-to-servo delay). A yellow
 dot shows the aim point. In simulation (target seen 250 ms late, 15 fps, noise) the aim error falls from 23 to 3 px at
 constant speed, 29 to 10 px for stop-and-go, and 84 to 60 px for a fast swing; a still target does not jitter more.
 The true delay has not been measured on the hardware yet: use `tools/latency_test.py`, then set the slider to match.

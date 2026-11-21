@@ -18,7 +18,7 @@ class LeadPredictor:
     reset_gap     after this many seconds without a measurement the filter forgets (target was lost).
     """
 
-    def __init__(self, alpha=0.6, beta=0.35, v_min=25.0, max_lead_frac=0.3, reset_gap=0.5):
+    def __init__(self, alpha=0.6, beta=0.35, v_min=60.0, max_lead_frac=0.3, reset_gap=0.5):
         self.alpha, self.beta = alpha, beta
         self.v_min, self.max_lead_frac, self.reset_gap = v_min, max_lead_frac, reset_gap
         self.reset()

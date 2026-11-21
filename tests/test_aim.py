@@ -65,7 +65,7 @@ def test_map():
     a.update(0.0, 0.0)                                  # target back at the center -> straight ahead
     for _ in range(20):
         a.update(0.0, 0.0)
-    assert g.pan == 90 and g.tilt == 135, (g.pan, g.tilt)
+    assert abs(g.pan - 90) <= 2.5 and abs(g.tilt - 135) <= 2.5, (g.pan, g.tilt)   # within the hold-still band
 
     for ex in (-1.0, -0.5, 0.25, 1.0):                  # symmetric, bounded, and monotonic mapping
         g = SimGimbal(90)
@@ -94,7 +94,7 @@ def test_map():
     settled = g.pan
     for e in (0.299, 0.302, 0.298, 0.301):
         a.update(e, 0.0)
-    assert g.pan == settled
+    assert abs(g.pan - settled) <= 1, (g.pan, settled)
     for ex, want in ((-1.0, 0), (1.0, 180), (0.0, 90)):   # the whole picture covers the whole pan range
         g = SimGimbal(90)
         a = Aimer(g)
@@ -110,7 +110,28 @@ def test_map():
     print("map mode tests passed")
 
 
+def test_no_hunting():
+    """A nearly still target seen through pixel noise must not keep the servo busy, and a real move must be quick."""
+    import random
+    rnd = random.Random(2)
+    g = SimGimbal(90)
+    a = Aimer(g)
+    last, moves = (g.pan, g.tilt), 0
+    for _ in range(150):                                   # ~10 s at 15 fps, 4 px of box-center noise
+        a.update(rnd.gauss(0, 4) / 320, rnd.gauss(0, 4) / 240)
+        if (g.pan, g.tilt) != last:
+            moves, last = moves + 1, (g.pan, g.tilt)
+    assert moves <= 15, f"servo hunted: {moves} moves in 10 s on a still target"
+    final = 90 + (480 - 320) / 320 * 90                    # now the target jumps 160 px to the right
+    frames = 0
+    while abs(g.pan - final) > 3 and frames < 30:
+        a.update((480 + rnd.gauss(0, 4) - 320) / 320, 0.0)
+        frames += 1
+    assert frames <= 2, f"a real move should be followed within 2 frames, took {frames}"
+
+
 def test():
+    test_no_hunting()
     test_map()
     # the field of view for a 60 degree diagonal, 4:3 picture
     assert abs(H_FOV - 49.6) < 0.2 and abs(V_FOV - 38.2) < 0.2, (H_FOV, V_FOV)

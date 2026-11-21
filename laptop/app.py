@@ -40,7 +40,8 @@ tracker = ColorTracker()
 # Flip buttons change these live.
 DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
 view = {"mirror": True, "vflip": False, "mask": False}   # flip the picture so it matches the real world (set from the dashboard)
-cfg = {"lead_ms": 250}               # aim this far ahead of a moving target (about the camera-to-servo delay)
+cfg = {"lead_ms": 0}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
+                                     # to about the measured camera-to-servo delay, using the dashboard slider)
 predictor = LeadPredictor()
 engage = Engagement()                 # SEARCH/ACQUIRE/TRACK/LOCK/COOLDOWN and the fire interlocks (simulated emitter)
 telemetry = Telemetry()

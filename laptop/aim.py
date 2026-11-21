@@ -43,23 +43,28 @@ class Aimer:
                  `max_step` degrees. The picture arrives a few frames late, so gains above ~0.3 oscillate.
     """
 
-    def __init__(self, gimbal, mode="map", gain=(0.2, 0.2), deadband=1.0, max_step=8.0, smooth=0.5,
-                 map_deadband=0.5, span=(PAN_RANGE[1] - PAN_RANGE[0], TILT_RANGE[1] - TILT_RANGE[0])):
+    def __init__(self, gimbal, mode="map", gain=(0.2, 0.2), deadband=1.0, max_step=8.0, smooth=0.35, fast_ramp=12.0,
+                 map_start=2.0, map_stop=0.6, span=(PAN_RANGE[1] - PAN_RANGE[0], TILT_RANGE[1] - TILT_RANGE[0])):
         self.gimbal = gimbal
         self.mode = mode
         self.gain = {"pan": gain[0], "tilt": gain[1]}
         self.sign = {"pan": 1, "tilt": 1}
         self.deadband = deadband
         self.max_step = max_step
-        self.smooth = smooth
+        self.smooth = smooth       # weight of a new reading while the goal is nearly still (calm)
+        self.fast_ramp = fast_ramp  # a goal change this many degrees or more is followed instantly
         self.span = {"pan": span[0], "tilt": span[1]}   # servo degrees covered by the full picture width/height
-        self.map_deadband = map_deadband   # servos move in whole degrees, so half a degree is the finest useful
+        # Hysteresis so the servo does not hunt on pixel noise: an axis that is holding still starts moving only when
+        # the goal is more than map_start degrees away, and once moving keeps going until within map_stop degrees.
+        self.map_start, self.map_stop = map_start, map_stop
+        self._moving = {"pan": False, "tilt": False}
         self._goal = None            # smoothed map-mode target (pan, tilt)
         self.settled = False         # True when the last update needed no movement: the gimbal is on target
 
     def reset(self):
         """Forget the smoothed goal (call when the target was lost, so a new target starts fresh)."""
         self._goal = None
+        self._moving = {"pan": False, "tilt": False}
 
     def set_mode(self, mode):
         if mode not in ("map", "follow"):
@@ -76,13 +81,25 @@ class Aimer:
         if self._goal is None:
             self._goal = goal
         else:
-            self._goal = tuple(self.smooth * g + (1 - self.smooth) * old for g, old in zip(goal, self._goal))
+            # speed-dependent smoothing: heavy while the goal barely changes (kills pixel noise), none for big moves
+            self._goal = tuple(
+                a * g + (1 - a) * old
+                for g, old, a in ((g, old, min(1.0, self.smooth + (1 - self.smooth) * abs(g - old) / self.fast_ramp))
+                                  for g, old in zip(goal, self._goal)))
         pan, tilt = (clamp(self._goal[0], PAN_RANGE), clamp(self._goal[1], TILT_RANGE))
         # only command an axis once it is off by more than the deadband, so a still target means a still servo
-        new_pan = pan if abs(pan - self.gimbal.pan) >= self.map_deadband else None
-        new_tilt = tilt if abs(tilt - self.gimbal.tilt) >= self.map_deadband else None
+        new_pan = pan if self._gate("pan", abs(pan - self.gimbal.pan)) else None
+        new_tilt = tilt if self._gate("tilt", abs(tilt - self.gimbal.tilt)) else None
         self.settled = new_pan is None and new_tilt is None
         return self.gimbal.move_to(pan=new_pan, tilt=new_tilt)
+
+    def _gate(self, axis, err):
+        """Hysteresis: True when this axis should be commanded to move toward its goal."""
+        if self._moving[axis]:
+            self._moving[axis] = err >= self.map_stop
+        elif err >= self.map_start:
+            self._moving[axis] = True
+        return self._moving[axis]
 
     def _follow_step(self, axis, err, fov):
         degrees = pixel_error_to_degrees(err, fov)
