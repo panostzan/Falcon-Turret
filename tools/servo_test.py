@@ -27,7 +27,7 @@ HELP = f"""commands:
 def handle(g, line, out=print):
     """Run one command. Returns False to quit. Never raises for bad input."""
     line = re.sub(r"[<>\[\]]", "", line.strip().lower())          # forgive <45> style brackets
-    line = re.sub(r"^([pt][+-]?)(\d)", r" ", line)             # p90 -> p 90, t+3 -> t+ 3, p-10 -> p- 10
+    line = re.sub(r"^([pt][+-]?)(\d)", r"\1 \2", line)         # p90 -> p 90, t+3 -> t+ 3, p-10 -> p- 10
     words = line.split()
     if not words:
         return True
