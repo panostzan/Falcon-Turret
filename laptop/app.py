@@ -36,9 +36,9 @@ new_frame = threading.Condition()   # notified whenever `latest` changes
 latest = {"jpg": None, "seq": 0, "state": {"connected": False, "fps": 0, "kb": 0, "boot": BOOT}}
 
 tracker = ColorTracker()
-# This turret's servos: tilt turns the opposite way from the picture's vertical axis. The dashboard's
+# This turret's servo directions (+1 = angle grows as the target goes right / down in the picture). The dashboard's
 # Flip buttons change these live.
-DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
+DEFAULT_SIGNS = {"pan": 1, "tilt": 1}
 view = {"mirror": True, "vflip": False, "mask": False}   # flip the picture so it matches the real world (set from the dashboard)
 cfg = {"lead_ms": 0}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
                                      # to about the measured camera-to-servo delay, using the dashboard slider)
