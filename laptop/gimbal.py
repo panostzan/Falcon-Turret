@@ -102,6 +102,7 @@ class Gimbal:
             link.reset_input_buffer()
         self.link = link
         self.pan, self.tilt = CENTER
+        self.pan_range, self.tilt_range = PAN_RANGE, TILT_RANGE   # free() widens the tilt range for calibration
 
     def _send(self, cmd):
         self.link.write(cmd.encode() + b"\n")
@@ -126,11 +127,25 @@ class Gimbal:
         """Stop holding the servos (they go limp). Any later move re-attaches them."""
         return self._send("D")
 
+    def resume(self):
+        """Hold the last angles again after release()."""
+        return self._send("A")
+
+    def free(self):
+        """Calibration only: lift the tilt limit to 0-180 (here and in the ESP, until it reboots or normal() is called)."""
+        self.tilt_range = (0, 180)
+        return self._send("W")
+
+    def normal(self):
+        """Back to the safe tilt range from limits.json."""
+        self.tilt_range = TILT_RANGE
+        return self._send("N")
+
     def move_to(self, pan=None, tilt=None):
         """Absolute move. Sends only the axes that actually change; angles are clamped to safe ranges."""
-        if pan is not None and (p := _clamp(pan, *PAN_RANGE)) != self.pan:
+        if pan is not None and (p := _clamp(pan, *self.pan_range)) != self.pan:
             self._send(f"P{p}")
-        if tilt is not None and (t := _clamp(tilt, *TILT_RANGE)) != self.tilt:
+        if tilt is not None and (t := _clamp(tilt, *self.tilt_range)) != self.tilt:
             self._send(f"T{t}")
         return self.pan, self.tilt
 

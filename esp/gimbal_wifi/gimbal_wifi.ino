@@ -3,6 +3,8 @@
 //
 // Commands (one per packet / line):  P<0-180> pan   T<0-45> tilt   C home   S status   D release (servos go limp)
 //                                    A resume (re-attach and hold the last angles)
+//                                    W widen tilt to 0-180 (for finding the real travel)   N back to the safe tilt range
+// The widened range lasts only until the ESP reboots or N is sent.
 // Reply: "P<pan> T<tilt>" or "ERR ...". Any P/T/C command re-attaches released servos.
 // SAFETY: the tilt bracket only allows 0-45 degrees, so the firmware itself refuses to go outside that,
 // whatever the host sends (angles are clamped, never passed through).
@@ -20,6 +22,7 @@ const int PAN_HOME = 90, TILT_HOME = 22;                              // start p
 Servo panServo, tiltServo;
 int panAngle = PAN_HOME, tiltAngle = TILT_HOME;
 bool attached = false;
+int tiltLo = TILT_MIN, tiltHi = TILT_MAX;   // current tilt limits (safe range unless widened with W)
 WiFiUDP udp;
 char serialBuf[16];
 size_t serialUsed = 0;
@@ -67,6 +70,14 @@ String runCommand(const char *cmd) {
     releaseServos();
   } else if (strcmp(cmd, "A") == 0) {
     attachServos();
+  } else if (strcmp(cmd, "W") == 0) {
+    tiltLo = 0;
+    tiltHi = 180;
+  } else if (strcmp(cmd, "N") == 0) {
+    tiltLo = TILT_MIN;
+    tiltHi = TILT_MAX;
+    tiltAngle = constrain(tiltAngle, tiltLo, tiltHi);   // bring the tilt back inside the safe range
+    if (attached) moveServo(tiltServo, tiltAngle);
   } else if ((cmd[0] == 'P' || cmd[0] == 'T') && n > 1) {
     if (n > 4) return "ERR invalid angle";
     for (size_t i = 1; i < n; ++i)
@@ -77,7 +88,7 @@ String runCommand(const char *cmd) {
       panAngle = constrain(angle, PAN_MIN, PAN_MAX);
       moveServo(panServo, panAngle);
     } else {
-      tiltAngle = constrain(angle, TILT_MIN, TILT_MAX);
+      tiltAngle = constrain(angle, tiltLo, tiltHi);
       moveServo(tiltServo, tiltAngle);
     }
   } else {
