@@ -159,3 +159,54 @@ class ColorTracker:
         self.conf_parts = {"fill": round(fill, 2), "size": round(size, 2), "unique": round(unique, 2),
                            "steady": round(steady, 2), "seen": round(seen, 2)}
         self.confidence = round(seen * (0.3 * fill + 0.25 * size + 0.25 * unique + 0.2 * steady), 3)
+
+
+class LastSeen:
+    """Perception status (not the mission steps): SEARCHING (never seen), TRACKING (seen now), OCCLUDED (just
+    vanished, a position estimate is offered), REACQUIRING (gone a while, still looking where it was) and LOST
+    (gone so long the estimate is no longer reliable).
+
+    Remembers where the target was last confirmed and how fast it was moving, so that after it disappears
+    (hidden behind something, out of the picture) we can show a ghost of the last confirmed position and a separate,
+    clearly labelled guess of where it probably is now. The guess is a straight-line extrapolation and is only
+    offered for PREDICT_S seconds; position confidence fades with time lost."""
+    PREDICT_S = 1.5        # stop extrapolating after this long
+    FADE_S = 2.5           # position confidence falls to 37% after this long
+    GHOST_S = 5.0          # the ghost box is drawn this long
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.box = None            # (cx, cy, w, h) of the last confirmed sighting
+        self.t = 0.0
+        self.v = (0.0, 0.0)        # centre velocity, pixels per second
+        self.conf = 0.0            # tracker confidence at that sighting
+
+    def seen(self, now, cx, cy, w, h, conf):
+        if self.box is not None and 0 < now - self.t < 0.5:
+            dt = now - self.t
+            vx, vy = (cx - self.box[0]) / dt, (cy - self.box[1]) / dt
+            self.v = (0.6 * self.v[0] + 0.4 * vx, 0.6 * self.v[1] + 0.4 * vy)
+        else:
+            self.v = (0.0, 0.0)
+        self.box, self.t, self.conf = (cx, cy, w, h), now, conf
+
+    def lost(self, now, frame_wh):
+        """None until something has been seen; otherwise a dict describing what is known about the missing target."""
+        if self.box is None:
+            return None
+        age = max(0.0, now - self.t)
+        cx, cy, w, h = self.box
+        W, H = frame_wh
+        pred = None
+        if age <= self.PREDICT_S and (abs(self.v[0]) + abs(self.v[1])) > 25:
+            pred = (min(max(cx + self.v[0] * age, 0), W), min(max(cy + self.v[1] * age, 0), H))
+        col = "left" if cx < W / 3 else "right" if cx > 2 * W / 3 else "centre"
+        row = "upper" if cy < H / 3 else "lower" if cy > 2 * H / 3 else "middle"
+        where = "centre" if (col, row) == ("centre", "middle") else f"{row} {col}".replace("upper centre", "top centre").replace("lower centre", "bottom centre").replace("middle ", "")
+        heading = "left" if self.v[0] < -30 else "right" if self.v[0] > 30 else None
+        status = "OCCLUDED" if age <= self.PREDICT_S else "REACQUIRING" if age <= self.GHOST_S else "LOST"
+        return {"status": status, "ago": round(age, 1), "last": [round(cx), round(cy), round(w), round(h)],
+                "pred": [round(pred[0]), round(pred[1])] if pred else None, "where": where, "heading": heading,
+                "pos_conf": 0.0 if status == "LOST" else round(self.conf * float(np.exp(-age / self.FADE_S)), 2)}

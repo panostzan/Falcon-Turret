@@ -47,6 +47,17 @@
       <small id="conf-parts"></small>
     </div>
 
+    <div class="panel" id="lostbox" hidden>
+      <h2 id="lost-title">Searching</h2>
+      <div class="big" id="lost-ago" style="color:var(--warn)">Target lost</div>
+      <table>
+        <tr><th>Strategy</th><td id="lost-strategy">–</td></tr>
+        <tr><th>Last known position</th><td id="lost-where">–</td></tr>
+        <tr><th>Position confidence</th><td id="lost-conf">–</td></tr>
+      </table>
+      <small>Position confidence is an estimate that fades with time.</small>
+    </div>
+
     <div class="panel">
       <h2>Mission</h2>
       <ol class="stepper" id="stepper"></ol>
@@ -199,10 +210,26 @@ function render(s) {
   const cp = s.conf_parts || {};
   $('conf-parts').textContent = s.target ? `solid ${Math.round(cp.fill * 100)} · size ${Math.round(cp.size * 100)} · alone ${Math.round(cp.unique * 100)} · steady ${Math.round(cp.steady * 100)} · seen ${Math.round(cp.seen * 100)}` : '';
   if (s.cfg && document.activeElement !== $('need')) { $('need').value = s.cfg.min_conf; $('needv').textContent = s.cfg.min_conf + '%'; }
+  const lost = s.lost, P = s.perception, e2 = s.engage || {};
+  const showBox = s.armed && P && P !== 'TRACKING';
+  $('lostbox').hidden = !showBox;
+  if (showBox) {
+    const sweep = s.tracking && e2.auto_scan && e2.state === 'SEARCH';
+    $('lost-title').textContent = P.charAt(0) + P.slice(1).toLowerCase();
+    $('lost-ago').textContent = !lost ? 'Nothing seen yet' : P === 'OCCLUDED' ? `Hidden for ${lost.ago.toFixed(1)}s`
+      : P === 'REACQUIRING' ? `Lost ${lost.ago.toFixed(1)}s ago` : `Lost, last seen ${lost.ago.toFixed(0)}s ago`;
+    $('lost-strategy').textContent = P === 'SEARCHING' ? (sweep ? 'Sweeping the pan range' : 'Scanning the whole picture')
+      : P === 'OCCLUDED' ? (lost.pred ? 'Predicting from its last motion' : 'Holding its last position')
+      : P === 'REACQUIRING' ? (sweep ? 'Sweeping the pan range' : 'Watching where it was') : 'Prediction no longer reliable; still scanning';
+    $('lost-where').textContent = lost ? lost.where + (lost.heading ? `, was moving ${lost.heading}` : '') : '–';
+    $('lost-conf').textContent = lost ? Math.round(lost.pos_conf * 100) + '% (estimate)' : '–';
+    $('lostbox').dataset.p = P;
+  }
   const badge = $('badge'); let text, cls = '';
   if (!s.connected) text = 'No picture';
   else if (!s.armed) text = 'Pick a target';
-  else if (!s.target) { text = 'Searching'; cls = 'warn'; }
+  else if (!s.target) { text = ({ SEARCHING: 'Searching', OCCLUDED: 'Occluded', REACQUIRING: 'Reacquiring', LOST: 'Lost' }[P] || 'Searching');
+    cls = P === 'LOST' ? 'bad' : 'warn'; }
   else if (!sure) { text = 'Not sure ' + pct + '%'; cls = 'warn'; }
   else if (e.state === 'LOCK' || e.state === 'COOLDOWN') { text = 'Locked'; cls = 'good'; }
   else { text = s.tracking ? 'Tracking' : 'Target found'; cls = 'good'; }

@@ -28,7 +28,7 @@ from predict import LeadPredictor  # noqa: E402
 from receiver import CameraFeed, FrameFeed   # noqa: E402
 from telemetry import Telemetry    # noqa: E402
 from depth_nn import NeuralDepth, overlay as depth_overlay   # noqa: E402  (loads onnxruntime only when the layer is first switched on)
-from tracker import PRESETS, ColorTracker   # noqa: E402
+from tracker import PRESETS, ColorTracker, LastSeen   # noqa: E402
 
 # "COM7" for USB serial, or e.g. "udp:192.168.137.50" for the Wi-Fi firmware. Override: set GIMBAL=udp:...
 GIMBAL_PORT = os.environ.get("GIMBAL", "COM7")
@@ -79,6 +79,7 @@ def set_tracking(on):
 
 
 depth_state = {"net": None, "error": None}     # the neural depth layer (off by default)
+last_seen = LastSeen()                         # last confirmed position, for the ghost and the search status
 trail = deque(maxlen=45)                       # recent target positions, for the Trail layer
 trail_seen = [0.0]                             # when the target was last seen (the trail clears after a second without it)
 
@@ -124,6 +125,34 @@ def draw_reticle(frame, cx, cy, fw, fh, conf, need):
     cv2.putText(frame, f"{int(conf * 100)}%", (x0, max(14, y0 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1, cv2.LINE_AA)
 
 
+def dashed(img, p0, p1, col, dash=6, thick=1):
+    """A dashed line (OpenCV only draws solid ones)."""
+    (x0, y0), (x1, y1) = p0, p1
+    n = max(1, int(math.hypot(x1 - x0, y1 - y0) // dash))
+    for i in range(0, n, 2):
+        a, b = i / n, min(1.0, (i + 1) / n)
+        cv2.line(img, (int(x0 + (x1 - x0) * a), int(y0 + (y1 - y0) * a)), (int(x0 + (x1 - x0) * b), int(y0 + (y1 - y0) * b)), col, thick)
+
+
+def draw_ghost(frame, lost):
+    """Fading dotted box at the last CONFIRMED position, and a separate dashed marker for the ESTIMATED position now."""
+    cx, cy, w, h = lost["last"]
+    fade = max(0.0, 1.0 - lost["ago"] / LastSeen.GHOST_S)
+    layer = frame.copy()
+    x0, y0, x1, y1 = cx - w // 2, cy - h // 2, cx + w // 2, cy + h // 2
+    for a, b in (((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)), ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))):
+        dashed(layer, a, b, AMBER, 5, 2)
+    cv2.putText(layer, f"last seen {lost['ago']}s ago", (x0, max(14, y0 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, AMBER, 1, cv2.LINE_AA)
+    if lost["pred"]:
+        px, py = lost["pred"]
+        dashed(layer, (cx, cy), (px, py), (255, 255, 255), 4, 1)
+        cv2.circle(layer, (px, py), max(8, min(w, h) // 3), (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.line(layer, (px - 5, py), (px + 5, py), (255, 255, 255), 1)
+        cv2.line(layer, (px, py - 5), (px, py + 5), (255, 255, 255), 1)
+        cv2.putText(layer, "estimate", (px + 10, py - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.addWeighted(layer, fade, frame, 1 - fade, 0, dst=frame)
+
+
 def process(jpg, ts=None):
     """Apply the view flips and, if a target is armed, find it, aim, and draw. Returns (JPEG, found flag)."""
     now = time.time() if ts is None else ts
@@ -148,6 +177,7 @@ def process(jpg, ts=None):
             cx, cy, fw, fh = face
             trail.append((int(cx), int(cy)))
             trail_seen[0] = now
+            last_seen.seen(now, cx, cy, fw, fh, tracker.confidence)
             if view["box"]:
                 draw_reticle(frame, cx, cy, fw, fh, tracker.confidence, engage.min_confidence)
             ax, ay = cx, cy                    # the point to aim at: the target, or where it is heading
@@ -168,6 +198,12 @@ def process(jpg, ts=None):
             info["speed"] = math.hypot(*predictor.velocity)
     if not found and trail and now - trail_seen[0] > 1.0:
         trail.clear()
+    lost = None
+    if tracker.armed and not found:
+        lost = last_seen.lost(now, (frame.shape[1], frame.shape[0]))
+        if lost and view["box"] and lost["ago"] <= LastSeen.GHOST_S:
+            draw_ghost(frame, lost)
+    info["lost"] = lost
     if view["trail"] and len(trail) > 1:           # older points are thinner and dimmer
         pts = list(trail)
         for i in range(1, len(pts)):
@@ -213,7 +249,8 @@ def capture_loop():
                  "angles": ctl["angles"], "sign": aimer.sign if aimer else None,
                  "mode": aimer.mode if aimer else "map", "view": dict(view),
                  "source": f"webcam {CAMERA}" if CAMERA is not None else "Pi",
-                 "preset": tracker.preset, "confidence": round(tracker.confidence, 2) if found else 0.0,
+                 "lost": info.get("lost"), "perception": ("TRACKING" if found else (info.get("lost") or {}).get("status", "SEARCHING"))
+                 if tracker.armed else None, "preset": tracker.preset, "confidence": round(tracker.confidence, 2) if found else 0.0,
                  "conf_parts": tracker.conf_parts if found else {}, "min_confidence": engage.min_confidence,
                  "depth": depth_state["net"].stats() if depth_state["net"] else None, "depth_error": depth_state["error"],
                  "dropped": feed.dropped, "age_ms": round(age_ms), "cfg": dict(cfg),
@@ -340,9 +377,11 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/select" and latest["jpg"]:
             frame = cv2.imdecode(np.frombuffer(latest["jpg"], np.uint8), cv2.IMREAD_COLOR)
             ok = tracker.select(frame, float(q["x"][0]), float(q["y"][0]))
+            last_seen.reset()
             return self._send(json.dumps({"ok": ok}).encode())
         if url.path == "/preset" and q.get("name", [""])[0] in PRESETS:
             tracker.use_preset(q["name"][0])
+            last_seen.reset()
             return self._send(b"{}")
         if url.path == "/view" and q.get("key", [""])[0] in view:
             view[q["key"][0]] = q.get("on", ["0"])[0] == "1"
@@ -350,6 +389,7 @@ class Handler(BaseHTTPRequestHandler):
                 tracker.last = None
                 predictor.reset()
                 trail.clear()
+                last_seen.reset()
             return self._send(b"{}")
         if url.path == "/arm":
             engage.arm(q.get("on", ["0"])[0] == "1", time.time())
@@ -366,6 +406,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(b"{}")
         if url.path == "/clear":
             tracker.clear()
+            last_seen.reset()
             return self._send(b"{}")
         if url.path == "/mode" and ctl["aimer"] and q.get("name", [""])[0] in ("map", "follow"):
             ctl["aimer"].set_mode(q["name"][0])

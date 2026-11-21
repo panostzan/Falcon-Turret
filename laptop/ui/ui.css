@@ -76,6 +76,9 @@ small, .dim { color: var(--dim); }
 }
 .badge.good { background: var(--teal); color: var(--teal-ink); border-color: var(--teal); }
 .badge.warn { background: var(--warn); color: #2a1c00; border-color: var(--warn); }
+.badge.bad { background: var(--alarm); color: #fff; border-color: var(--alarm); }
+#lostbox[data-p="LOST"] h2 { color: var(--alarm); }
+#lostbox[data-p="OCCLUDED"] h2, #lostbox[data-p="REACQUIRING"] h2 { color: var(--warn); }
 .hint { color: var(--dim); margin: 0; font-size: 12px; }
 
 /* controls */
