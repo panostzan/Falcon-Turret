@@ -152,7 +152,6 @@ function assess() {
   else if (q.present && q.used) tile('QNX brain', 'ok', `${q.proc_ms} ms`, `${q.state}${q.armed ? ' ARMED' : ''}, tracking`);
   else if (q.present && !s.armed) tile('QNX brain', 'ok', 'standby', 'pick a target to start');
   else if (q.present && !s.view.qnx) tile('QNX brain', 'off', 'switched off', 'laptop tracker in use');
-  else if (q.present && s.preset !== 'teal' && s.preset !== 'blue') tile('QNX brain', 'off', 'laptop', 'a clicked target');
   else if (q.present) { tile('QNX brain', 'warn', 'not tracking', 'laptop tracker in use'); issue('warn', 'QNX is not tracking', 'The Pi is answering, but its answers are too old to use, so the laptop tracker has taken over.', 'Check the Wi-Fi link; this clears by itself when answers are fresh again.'); }
   else { tile('QNX brain', 'bad', 'not answering', 'the Pi'); issue('bad', 'The QNX tracker is not answering', 'The program on the Pi (the tracker and the safety interlock) is not reporting, so the laptop tracker is the fallback and the watchdog is not protecting you.', 'Check the Pi is on and the camera is plugged in, then restart the dashboard.'); }
 

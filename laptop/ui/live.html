@@ -23,7 +23,7 @@
       <button data-preset="focus">Focus</button>
       <button data-preset="depth">Depth</button>
       <button data-preset="clean">Clean</button>
-      <span class="hint" id="hint">Click the target in the picture to learn its color.</span>
+      <span class="hint" id="hint">Pick Teal or Blue to choose what to track.</span>
     </div>
   </section>
 
@@ -155,16 +155,6 @@ let seq = -1, shown = null;
   } catch (e) { await new Promise(t => setTimeout(t, 500)); }
   pump();
 })();
-video.onclick = async e => {
-  const r = video.getBoundingClientRect(), sx = video.naturalWidth / r.width, sy = video.naturalHeight / r.height;
-  // the picture is letterboxed with object-fit: contain, so map the click into the picture itself
-  const scale = Math.min(r.width / video.naturalWidth, r.height / video.naturalHeight);
-  const ox = (r.width - video.naturalWidth * scale) / 2, oy = (r.height - video.naturalHeight * scale) / 2;
-  const x = (e.clientX - r.left - ox) / scale, y = (e.clientY - r.top - oy) / scale;
-  if (x < 0 || y < 0 || x > video.naturalWidth || y > video.naturalHeight) return;
-  const res = await api.post(`/select?x=${x}&y=${y}`);
-  $('err').textContent = res.ok === false ? 'That spot is a wall or too big. Click directly on the target.' : '';
-};
 
 /* target and tracking */
 $('p-teal').onclick = () => api.post('/preset?name=teal');
@@ -218,7 +208,7 @@ function render(s) {
   pressed($('scan'), e.auto_scan);
 
   pressed($('p-teal'), s.preset === 'teal'); pressed($('p-blue'), s.preset === 'blue'); pressed($('p-clear'), !s.armed);
-  $('tsel').textContent = 'Target: ' + ({ teal: 'teal', blue: 'blue', picked: 'picked from the picture' }[s.preset] || 'none');
+  $('tsel').textContent = 'Target: ' + ({ teal: 'teal', blue: 'blue' }[s.preset] || 'none');
   const pct = Math.round((s.confidence || 0) * 100), need = Math.round((s.min_confidence || 0.8) * 100), sure = s.target && pct >= need;
   $('meter-fill').style.width = pct + '%'; $('meter-need').style.left = need + '%';
   $('meter').className = 'meter ' + (!s.target ? '' : sure ? 'sure' : 'unsure');
@@ -260,7 +250,7 @@ function render(s) {
   else if (e.state === 'LOCK' || e.state === 'COOLDOWN') { text = 'Locked'; cls = 'good'; }
   else { text = s.tracking ? 'Tracking' : 'Target found'; cls = 'good'; }
   badge.textContent = text; badge.className = 'badge ' + cls;
-  $('hint').textContent = s.armed ? 'Click the picture to choose a different target.' : 'Click the target in the picture to learn its color, or pick Teal.';
+  $('hint').textContent = s.armed ? 'Tracking the ' + (s.preset || 'chosen') + ' target.' : 'Pick Teal or Blue to choose what to track.';
 
   const tb = $('track'); tb.textContent = s.tracking ? 'Stop tracking' : 'Start tracking'; tb.className = s.tracking ? 'danger' : 'primary';
   $('err').textContent = s.error || s.depth_error || $('err').textContent;

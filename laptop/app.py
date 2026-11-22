@@ -1,7 +1,7 @@
 """Turret server.  Run: python laptop/app.py   then open http://localhost:8000
 
-Relays the Pi's JPEG frames to the browser. Click a target in the video to lock its color (a box appears).
-When tracking is switched on from the dashboard the server also follows the clicked target and nudges the gimbal (Feather M0 + PCA9685 on COM8) to center it. Tracking starts OFF.
+Relays the Pi's JPEG frames to the browser. The target is the Teal or Blue preset (picked in the dashboard); the Pi's tracker finds it.
+When tracking is switched on from the dashboard the server aims the gimbal (Feather M0 + PCA9685 on COM8) at it. Tracking starts OFF.
 Binds to localhost only.
 """
 import ctypes
@@ -80,7 +80,7 @@ def send_pi(line):
 
 def qnx_status():
     """turretd's newest answer if the QNX tracker should be used right now, else None. It is used when the layer is on, a
-    color preset is the target (the C tracker has presets, not click-to-pick) and the answer is recent."""
+    color preset is the target (the C tracker works from the Teal and Blue presets) and the answer is recent."""
     f = feed_ref["feed"]
     if not (view["qnx"] and f and tracker.preset in ("teal", "blue")):
         return None
@@ -563,12 +563,6 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/track":
             err = set_tracking(q.get("on", ["0"])[0] == "1")
             return self._send(json.dumps({"error": err}).encode())
-        if url.path == "/select" and latest["jpg"]:
-            frame = cv2.imdecode(np.frombuffer(latest["jpg"], np.uint8), cv2.IMREAD_COLOR)
-            ok = tracker.select(frame, float(q["x"][0]), float(q["y"][0]))
-            last_seen.reset()
-            send_pi("clear")                                  # a clicked target is tracked on the laptop, not by the C presets
-            return self._send(json.dumps({"ok": ok}).encode())
         if url.path == "/preset" and q.get("name", [""])[0] in PRESETS:
             tracker.use_preset(q["name"][0])
             last_seen.reset()
