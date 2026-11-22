@@ -54,7 +54,7 @@
       <div class="big" id="lost-ago" style="color:var(--warn)">–</div>
       <table>
         <tr><th>Mode</th><td id="lost-strategy">–</td></tr>
-        <tr><th>Last seen</th><td id="lost-where">–</td></tr>
+        <tr><th>Position</th><td id="lost-where">–</td></tr>
         <tr><th>Estimate</th><td id="lost-conf">–</td></tr>
       </table>
     </div>
@@ -224,7 +224,7 @@ function render(s) {
   if (showBox) {
     const sweep = s.tracking && e2.auto_scan && e2.state === 'SEARCH';
     $('lost-title').textContent = P.charAt(0) + P.slice(1).toLowerCase();
-    $('lost-ago').textContent = !lost ? 'No target' : lost.ago < 10 ? lost.ago.toFixed(1) + ' s' : lost.ago.toFixed(0) + ' s';
+    $('lost-ago').textContent = !lost ? 'No target' : 'Last seen ' + (lost.ago < 10 ? lost.ago.toFixed(1) : lost.ago.toFixed(0)) + 's ago';
     $('lost-strategy').textContent = P === 'SEARCHING' ? (sweep ? 'Sweep' : 'Scan')
       : P === 'OCCLUDED' ? (lost.pred ? 'Predict' : 'Hold')
       : P === 'REACQUIRING' ? (sweep ? 'Sweep' : 'Watch') : 'Scan';
