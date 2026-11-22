@@ -15,7 +15,7 @@ KEY = os.path.expanduser("~/.ssh/turret_ed25519")
 FPS, QUALITY = 30, 90   # recorder fps, JPEG quality (lower = smaller frames, faster)
 
 
-def _ssh_open(ip, timeout=0.6):
+def _ssh_open(ip, timeout=1.5):
     try:
         with socket.create_connection((ip, 22), timeout=timeout):
             return True
@@ -40,14 +40,18 @@ def find_pi_ip():
     for ip in re.findall(pattern, _arp_table(), re.I):
         if _ssh_open(ip):
             return ip
-    with ThreadPoolExecutor(64) as pool:                   # not in ARP (or stale): look for every SSH host
-        ips = [f"192.168.137.{i}" for i in range(2, 255)]
-        hits = [ip for ip, ok in zip(ips, pool.map(_ssh_open, ips)) if ok]
-    table = _arp_table()                                   # the scan just filled in the MAC addresses
-    for ip in hits:
-        if re.search(re.escape(ip) + r"\s+" + PI_MAC, table, re.I):
-            return ip
-    return hits[0] if len(hits) == 1 else FALLBACK_IP      # a single SSH host on this network is the Pi
+    hits = []
+    for _attempt in range(2):                              # a busy hotspot can miss a host once: scan twice before giving up
+        with ThreadPoolExecutor(64) as pool:               # not in ARP (or stale): look for every SSH host
+            ips = [f"192.168.137.{i}" for i in range(2, 255)]
+            hits = [ip for ip, ok in zip(ips, pool.map(_ssh_open, ips)) if ok]
+        table = _arp_table()                               # the scan just filled in the MAC addresses
+        for ip in hits:
+            if re.search(re.escape(ip) + r"\s+" + PI_MAC, table, re.I):
+                return ip
+        if len(hits) == 1:
+            return hits[0]                                 # a single SSH host on this network is the Pi
+    return FALLBACK_IP
 
 
 def _spawn(quality):
