@@ -40,17 +40,30 @@ class TiltControl:
         return self.set(self.angle + delta)
 
     def set_limits(self, lo, hi):
+        """Low and high ends of the sweep. The firmware only takes 90-180, so anything outside is clamped to that range
+        (typing 0 and 90 gives a sweep of 90 to 90, which is no sweep at all: sweep_step then refuses to move)."""
         lo, hi = int(lo), int(hi)
         self.lo = max(TILT_RANGE[0], min(lo, hi))
         self.hi = min(TILT_RANGE[1], max(lo, hi))
 
     def sweep_step(self):
-        """One step of the back-and-forth sweep (1 degree). Turns around at the limits."""
-        if self.angle >= self.hi:
+        """One step of the back-and-forth sweep: ALWAYS exactly one degree (or none). Turns around at the limits. If the
+        current angle is outside the limits it walks back toward them one degree at a time, it never jumps. With no room
+        to sweep (low equals high) it stops sweeping instead of sitting on one angle."""
+        if self.hi - self.lo < 2:
+            self.sweeping = False
+            if self.log:
+                self.log(f"{time.strftime('%H:%M:%S')} sweep stopped: low and high are {self.lo} and {self.hi}")
+            return self.angle
+        if self.angle > self.hi:
             self.direction = -1
-        elif self.angle <= self.lo:
+        elif self.angle < self.lo:
             self.direction = 1
-        return self.set(min(self.hi, max(self.lo, self.angle + self.direction)))
+        elif self.angle == self.hi:
+            self.direction = -1
+        elif self.angle == self.lo:
+            self.direction = 1
+        return self.set(self.angle + self.direction)
 
     def mark(self, which):
         self.marks[which] = self.angle
