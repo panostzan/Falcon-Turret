@@ -1,7 +1,7 @@
 """Turret server.  Run: python laptop/app.py   then open http://localhost:8000
 
 Relays the Pi's JPEG frames to the browser. Click a target in the video to lock its color (a box appears).
-When tracking is switched on from the dashboard the server also follows the clicked target and nudges the gimbal (ESP32 on COM7) to center it. Tracking starts OFF.
+When tracking is switched on from the dashboard the server also follows the clicked target and nudges the gimbal (Feather M0 + PCA9685 on COM8) to center it. Tracking starts OFF.
 Binds to localhost only.
 """
 import ctypes
@@ -31,8 +31,8 @@ from telemetry import Telemetry    # noqa: E402
 from depth_nn import DepthSmoother, NeuralDepth, thumbnail, overlay as depth_overlay   # noqa: E402  (loads onnxruntime only when the layer is first switched on)
 from tracker import PRESETS, ColorTracker, LastSeen   # noqa: E402
 
-# "COM7" for USB serial, or e.g. "udp:192.168.137.50" for the Wi-Fi firmware. Override: set GIMBAL=udp:...
-GIMBAL_PORT = os.environ.get("GIMBAL", "COM7")
+# "COM8" for USB serial (the Feather M0; the old ESP32 was COM7), or e.g. "udp:192.168.137.50" for the Wi-Fi firmware. Override: set GIMBAL=udp:...
+GIMBAL_PORT = os.environ.get("GIMBAL", "COM8")
 # Video source: the Pi by default. `python laptop/app.py --camera 1` (or CAMERA=1) uses a USB webcam on this laptop instead.
 CAMERA = (int(sys.argv[sys.argv.index("--camera") + 1]) if "--camera" in sys.argv
           else int(os.environ["CAMERA"]) if os.environ.get("CAMERA", "").isdigit() else None)

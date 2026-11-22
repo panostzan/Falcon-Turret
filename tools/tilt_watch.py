@@ -194,4 +194,4 @@ def run_window(port):
 
 
 if __name__ == "__main__":
-    run_window(os.environ.get("GIMBAL", "COM7"))
+    run_window(os.environ.get("GIMBAL", "COM8"))

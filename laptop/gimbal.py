@@ -70,7 +70,7 @@ def _clamp(v, lo, hi):
 
 class Gimbal:
     def __init__(self, port=None, baud=115200, link=None, settle_s=2.0, tilt_limits=None):
-        """port: 'COM7' (USB serial) or 'udp:192.168.137.50' (Wi-Fi firmware).
+        """port: 'COM8' (USB serial, the Feather M0) or 'udp:192.168.137.50' (Wi-Fi firmware).
         link: a pre-opened serial-like object (used by tests).
         tilt_limits: (low, high) the tilt is never commanded outside. Default: the saved calibration, else 0-45. Pass
         TILT_RANGE for no limit (the calibration tool does)."""
@@ -235,6 +235,6 @@ class AsyncGimbal:
 
 if __name__ == "__main__":
     import sys
-    port = sys.argv[1] if len(sys.argv) > 1 else "COM7"
+    port = sys.argv[1] if len(sys.argv) > 1 else "COM8"
     with Gimbal(port) as g:
         print("status:", g.status())

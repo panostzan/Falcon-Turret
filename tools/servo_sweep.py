@@ -65,7 +65,7 @@ def sweep_axis(gimbal, axis, lo, hi, cycles, step, delay, sleep=time.sleep, say=
 
 def main(argv=None, gimbal=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--port", default=os.environ.get("GIMBAL", "COM7"))
+    p.add_argument("--port", default=os.environ.get("GIMBAL", "COM8"))
     p.add_argument("--axis", choices=("pan", "tilt", "both"), default="both")
     p.add_argument("--cycles", type=int, default=3)
     p.add_argument("--step", type=int, default=2, help="degrees per move (default 2)")

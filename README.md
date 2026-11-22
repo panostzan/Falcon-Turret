@@ -4,18 +4,18 @@ Computer-vision turret: a Logitech C270 on a Raspberry Pi 5 (QNX 8.0) streams vi
 colored target and aims a two-servo gimbal (ESP32). Phase 1: working tracking + aiming + dashboard.
 
 ```
-C270 -> Pi (QNX) --SSH/Wi-Fi--> laptop --USB serial (COM7) or UDP--> ESP32 -> pan/tilt servos
+C270 -> Pi (QNX) --SSH/Wi-Fi--> laptop --USB serial (COM8) --> Feather M0 --I2C--> PCA9685 -> pan / tilt / lift servos
                                   |
                                   +--> dashboard (http://localhost:8000)
 ```
 
 ## Run
-1. Windows hotspot on (name/password in your wifi_config.h); Pi powered and joined; ESP32 plugged into the laptop (COM7).
+1. Windows hotspot on (name/password in your wifi_config.h); Pi powered and joined; Feather M0 plugged into the laptop (COM8), servo supply on the PCA9685.
 2. `python laptop/app.py`, then open http://localhost:8000.
 3. Click **Teal** (or click the target), then **Tracking: ON**. "Show color match" tints the pixels the filter accepts.
 
 The Pi's SSH key is pinned under the alias `qnxpi` in `~/.ssh/known_hosts` (so a new IP address needs no re-trusting).
-Settings: `GIMBAL` env var picks the ESP link (`COM7` default, or `udp:192.168.137.50`); `PI_HOST` overrides the
+Settings: `GIMBAL` env var picks the gimbal link (`COM8` default, the Feather M0); `PI_HOST` overrides the
 Pi address (normally found by its MAC address, because the hotspot changes its IP).
 
 ## Layout
