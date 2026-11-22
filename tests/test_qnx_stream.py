@@ -238,7 +238,7 @@ def test_app():
     ff = FakeFeed(meta())
     app.feed_ref["feed"] = ff
     app.ctl.update(tracking=False, aimer=None, error=None)
-    app.view.update(mirror=False, vflip=False, mask=False, depth=False, depthcheck=False, cutout=False, box=True, qnx=True)
+    app.view.update(mirror=False, vflip=False, mask=False, depth=False, depthcheck=False, box=True, qnx=True)
     app.tracker.use_preset("teal")
     app.last_seen.reset()
     app.qnx_sync["t"] = 0.0

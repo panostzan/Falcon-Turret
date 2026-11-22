@@ -20,7 +20,6 @@
     <div class="layers" id="layers" role="group" aria-label="Layers"></div>
     <div class="presets">Views
       <button data-preset="tracking">Tracking</button>
-      <button data-preset="focus">Focus</button>
       <button data-preset="depth">Depth</button>
       <button data-preset="clean">Clean</button>
       <span class="hint" id="hint">Pick Teal or Blue to choose what to track.</span>
@@ -91,8 +90,6 @@
           <button id="fadestale" aria-pressed="false" title="Experimental: fades the depth where the picture moved since it was computed. Can look patchy.">Hide stale depth</button>
           <button id="smooth" aria-pressed="true" title="Glides between depth results, averages flicker, follows camera motion">Smooth depth</button>
         </div>
-        <label>Cutout: dim things farther than the target by <b id="cutv">15%</b>
-          <input id="cut" type="range" min="0" max="60" step="5" value="15"></label>
         <label>Confidence needed to lock and fire: <b id="needv">80%</b>
           <input id="need" type="range" min="50" max="100" step="5" value="80"></label>
         <label>Look ahead of a moving target: <b id="leadv">0 ms</b>
@@ -110,13 +107,11 @@ const LAYERS = [
   { key: 'trail', name: 'Trail', tag: 'measured' },
   { key: 'mask', name: 'Color match', tag: 'measured' },
   { key: 'depth', name: 'Depth', tag: 'estimated, relative' },
-  { key: 'cutout', name: 'Cutout', tag: 'estimated, needs target' },
 ];
 const PRESETS = {
-  tracking: { box: 1, trail: 1, mask: 0, depth: 0, cutout: 0 },
-  focus: { box: 1, trail: 0, mask: 0, depth: 0, cutout: 1 },
-  depth: { box: 0, trail: 0, mask: 0, depth: 1, cutout: 0 },
-  clean: { box: 0, trail: 0, mask: 0, depth: 0, cutout: 0 },
+  tracking: { box: 1, trail: 1, mask: 0, depth: 0 },
+  depth: { box: 0, trail: 0, mask: 0, depth: 1 },
+  clean: { box: 0, trail: 0, mask: 0, depth: 0 },
 };
 const STEPS = ['SEARCH', 'ACQUIRE', 'TRACK', 'LOCK', 'COOLDOWN'];
 const STEP_LABEL = { SEARCH: 'Search', ACQUIRE: 'Acquire', TRACK: 'Track', LOCK: 'Lock', COOLDOWN: 'Cooldown' };
@@ -185,8 +180,6 @@ $('dcheck').onclick = () => setView('depthcheck', !(S && S.view && S.view.depthc
 $('fadestale').onclick = () => setView('fadestale', !(S && S.view && S.view.fadestale));
 $('smooth').onclick = () => setView('smooth', !(S && S.view && S.view.smooth));
 $('vflip').onclick = () => setView('vflip', !(S && S.view && S.view.vflip));
-$('cut').oninput = e => { $('cutv').textContent = e.target.value + '%'; };
-$('cut').onchange = e => api.post('/cfg?cut=' + e.target.value);
 $('need').oninput = e => { $('needv').textContent = e.target.value + '%'; };
 $('need').onchange = e => api.post('/cfg?min_conf=' + e.target.value);
 $('lead').oninput = e => { $('leadv').textContent = e.target.value + ' ms'; };
@@ -215,8 +208,6 @@ function render(s) {
   $('conf-note').textContent = !s.target ? 'No target' : sure ? 'Sure enough to engage' : 'Not sure: will not lock or fire';
   const cp = s.conf_parts || {};
   $('conf-parts').textContent = s.target ? `solid ${Math.round(cp.fill * 100)} · size ${Math.round(cp.size * 100)} · alone ${Math.round(cp.unique * 100)} · steady ${Math.round(cp.steady * 100)} · seen ${Math.round(cp.seen * 100)}` + (cp.depth != null ? ` · depth ${Math.round(cp.depth * 100)}` : '') : '';
-  if (s.cfg && document.activeElement !== $('cut')) { $('cut').value = s.cfg.cut; $('cutv').textContent = s.cfg.cut + '%'; }
-  $('layer-cutout').querySelector('span').textContent = v.cutout && !s.cutout_active ? 'waiting for a target' : 'estimated, needs target';
   if (s.cfg && document.activeElement !== $('need')) { $('need').value = s.cfg.min_conf; $('needv').textContent = s.cfg.min_conf + '%'; }
   const lost = s.lost, P = s.perception, e2 = s.engage || {};
   const showBox = s.armed && P && P !== 'TRACKING';

@@ -155,7 +155,7 @@ function assess() {
 
   // Depth network
   if (s.depth_error) { tile('Depth network', 'bad', 'error', ''); issue('warn', 'Depth network error', s.depth_error); }
-  else if (!s.view.depth && !s.view.depthcheck && !s.view.cutout) tile('Depth network', 'off', 'off', '');
+  else if (!s.view.depth && !s.view.depthcheck) tile('Depth network', 'off', 'off', '');
   else if (s.depth && s.depth.fps < 5) tile('Depth network', 'warn', `${s.depth.fps} fps`, `${s.depth.ms} ms/frame`);
   else tile('Depth network', 'ok', s.depth ? `${s.depth.fps} fps` : 'loading', s.depth ? `${s.depth.ms} ms/frame` : '');
 

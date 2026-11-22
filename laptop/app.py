@@ -60,8 +60,8 @@ _cal_window, _cal_sign = tilt_calibration.load()          # made with tools/tilt
 _tw = os.environ.get("TILT_WINDOW") or ("%d,%d" % _cal_window if _cal_window else "0,45")
 TILT_WINDOW = None if _tw == "full" else tuple(int(v) for v in _tw.split(","))
 DEFAULT_SIGNS = {"pan": 1, "tilt": (_cal_sign if (_cal_window and not os.environ.get("TILT_WINDOW")) else 1) if TILT_WINDOW else -1}
-view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False, "smooth": True, "depthcheck": False, "cutout": False, "fadestale": False, "qnx": True}   # flip the picture so it matches the real world (set from the dashboard)
-cfg = {"lead_ms": 0, "min_conf": 80, "cut": 15}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
+view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False, "smooth": True, "depthcheck": False, "fadestale": False, "qnx": True}   # flip the picture so it matches the real world (set from the dashboard)
+cfg = {"lead_ms": 0, "min_conf": 80}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
                                      # to about the measured camera-to-servo delay, using the dashboard slider)
 predictor = LeadPredictor()
 engage = Engagement()                 # SEARCH/ACQUIRE/TRACK/LOCK/COOLDOWN and the fire interlocks (simulated emitter)
@@ -197,13 +197,13 @@ def depth_map(frame):
     """If the Depth layer or the depth check is on: hand the clean picture to the background network and return its
     newest result (smoothed and motion-compensated unless smoothing is off), or None. The network runs on its own
     thread, so this never waits. If it cannot start, both switch themselves off."""
-    if not (view["depth"] or view["depthcheck"] or view["cutout"]):
+    if not (view["depth"] or view["depthcheck"]):
         return None
     if depth_state["net"] is None:
         depth_state["net"] = NeuralDepth()
     net = depth_state["net"]
     if not net.available:
-        depth_state["error"], view["depth"], view["depthcheck"], view["cutout"] = net.error, False, False, False
+        depth_state["error"], view["depth"], view["depthcheck"] = net.error, False, False
         return None
     depth_state["error"] = None
     net.submit(frame)
@@ -318,26 +318,6 @@ def log_tracking_change(found, qnx, conf, now):
         pass
 
 
-def cutout_active():
-    """The Cutout layer can only work while a target's depth is known (and the target was seen recently)."""
-    return bool(view["cutout"] and tracker.depth_focus is not None and tracker.missed <= 10)
-
-
-def apply_cutout(frame, dmap):
-    """Dim everything clearly FARTHER than the target (things at its depth, or nearer, stay bright). Where the picture
-    moved since the depth was computed the depth is stale, so nothing is dimmed there. `cfg["cut"]` is how much farther
-    than the target (in percent of the depth range) something must be before it dims."""
-    if dmap is None or not cutout_active():
-        return frame
-    h, w = frame.shape[:2]
-    d = cv2.resize(dmap, (w, h), interpolation=cv2.INTER_LINEAR)
-    far = np.clip((tracker.depth_focus - cfg["cut"] / 100.0 - d) / 0.08, 0.0, 1.0)
-    if depth_state["stale"] is not None:
-        far *= 1.0 - cv2.resize(depth_state["stale"], (w, h), interpolation=cv2.INTER_LINEAR)
-    far = (0.85 * far).astype(np.float32)
-    return cv2.blendLinear(frame, cv2.convertScaleAbs(frame, alpha=0.25), 1.0 - far, far)
-
-
 def apply_depth(frame, dmap):
     """Lay the depth heatmap over the picture when the Depth layer is on."""
     return depth_overlay(frame, dmap, stale=depth_state["stale"]) if (view["depth"] and dmap is not None) else frame
@@ -398,7 +378,7 @@ def draw_ghost(frame, lost):
 def process(jpg, ts=None):
     """Apply the view flips and, if a target is armed, find it, aim, and draw. Returns (JPEG, found flag)."""
     now = time.time() if ts is None else ts
-    if not (view["mirror"] or view["vflip"] or view["depth"] or view["depthcheck"] or view["cutout"] or tracker.armed):
+    if not (view["mirror"] or view["vflip"] or view["depth"] or view["depthcheck"] or tracker.armed):
         engage.update(now, False, False, False)
         return jpg, False                # nothing to change: the Pi's JPEG goes straight to the browser
     frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
@@ -428,7 +408,6 @@ def process(jpg, ts=None):
     dmap = depth_map(frame)                          # also None when neither the Depth layer nor the depth check is on
     if face and dmap is not None:
         tracker.check_depth(dmap)
-    frame = apply_cutout(frame, dmap)
     frame = apply_depth(frame, dmap)
     if tracker.armed:
         h, w = frame.shape[:2]
@@ -520,7 +499,7 @@ def capture_loop():
                  "mode": aimer.mode if aimer else "map", "view": dict(view),
                  "source": f"webcam {CAMERA}" if CAMERA is not None else "Pi",
                  "lost": info.get("lost"), "perception": ("TRACKING" if found else (info.get("lost") or {}).get("status", "SEARCHING"))
-                 if tracker.armed else None, "cutout_active": cutout_active(), "preset": tracker.preset, "confidence": round(tracker.confidence, 2) if found else 0.0,
+                 if tracker.armed else None, "preset": tracker.preset, "confidence": round(tracker.confidence, 2) if found else 0.0,
                  "conf_parts": tracker.conf_parts if found else {}, "min_confidence": engage.min_confidence,
                  "depth": depth_state["net"].stats() if depth_state["net"] else None, "depth_error": depth_state["error"],
                  "dropped": feed.dropped, "age_ms": round(age_ms), "cfg": dict(cfg),
@@ -689,9 +668,6 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/autoscan":
             engage.auto_scan = q.get("on", ["0"])[0] == "1"
             send_pi(f"auto_scan {1 if engage.auto_scan else 0}")
-            return self._send(b"{}")
-        if url.path == "/cfg" and "cut" in q:
-            cfg["cut"] = max(0, min(60, int(float(q["cut"][0]))))
             return self._send(b"{}")
         if url.path == "/cfg" and "min_conf" in q:
             cfg["min_conf"] = max(30, min(100, int(float(q["min_conf"][0]))))

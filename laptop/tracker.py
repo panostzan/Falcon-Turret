@@ -40,7 +40,6 @@ class ColorTracker:
         self.streak = 0          # consecutive frames the target has been found
         self.blob = None         # (x, y, w, h) of the matched group at half size, for the depth check
         self.depth_ref = None    # depth of the target we have been following (0..1, relative)
-        self.depth_focus = None  # smoothed depth of the target right now (used by the Cutout layer)
 
     @property
     def armed(self):
@@ -51,12 +50,11 @@ class ColorTracker:
         lo, hi = PRESETS[name]
         self.lo, self.hi = np.array(lo), np.array(hi)
         self.ref_area, self.last, self.missed = None, None, 0
-        self.preset, self.confidence, self.streak, self.depth_ref, self.depth_focus = name, 0.0, 0, None, None
+        self.preset, self.confidence, self.streak, self.depth_ref = name, 0.0, 0, None
 
     def clear(self):
         self.lo = self.hi = self.ref_area = self.last = self.debug_mask = self.preset = None
         self.confidence, self.streak, self.conf_parts, self.depth_ref, self.blob = 0.0, 0, {}, None, None
-        self.depth_focus = None
 
     def _prep(self, frame):
         return cv2.cvtColor(cv2.GaussianBlur(cv2.resize(frame, None, fx=SCALE, fy=SCALE), (5, 5), 0),
@@ -109,7 +107,7 @@ class ColorTracker:
             self.clear()
             return False
         self.ref_area, self.last, self.missed = float(max(g[0] for g in hit)), None, 0
-        self.preset, self.confidence, self.streak, self.depth_ref, self.depth_focus = "picked", 0.0, 0, None, None
+        self.preset, self.confidence, self.streak, self.depth_ref = "picked", 0.0, 0, None
         return True
 
     def find(self, frame):
@@ -182,7 +180,6 @@ class ColorTracker:
         if sel.size < 30:
             return
         med = float(np.median(sel))
-        self.depth_focus = med if self.depth_focus is None else 0.7 * self.depth_focus + 0.3 * med
         consistent = float(np.mean(np.abs(sel - med) <= DEPTH_BAND))
         steady = 1.0 if self.depth_ref is None else 1.0 / (1.0 + (abs(med - self.depth_ref) / DEPTH_JUMP) ** 4)
         score = consistent * steady
