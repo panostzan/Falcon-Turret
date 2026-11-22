@@ -51,6 +51,7 @@ tracker = ColorTracker()
 # on the real turret, the other way pointed the wrong direction. The dashboard's Flip buttons change these live.
 # The tilt servo's usable travel (degrees). The picture height maps onto it: bottom of the picture = the high end (45), top = the low
 # end (0), middle = 22.5. Override with TILT_WINDOW="0,45"; "full" uses the whole 90-180 range and the older sign.
+TILT_ON = os.environ.get("TILT", "on").lower() != "off"      # TILT=off: pan only, the tilt servo is never commanded
 _cal_window, _cal_sign = tilt_calibration.load()          # made with tools/tilt_watch.py (Mark TOP / Mark BOTTOM)
 _tw = os.environ.get("TILT_WINDOW") or ("%d,%d" % _cal_window if _cal_window else "0,45")
 TILT_WINDOW = None if _tw == "full" else tuple(int(v) for v in _tw.split(","))
@@ -96,7 +97,7 @@ def set_tracking(on):
             return None
         try:
             if ctl["aimer"] is None:
-                ctl["aimer"] = Aimer(AsyncGimbal(GIMBAL_PORT, tilt_limits=TILT_WINDOW or TILT_RANGE), tilt_window=TILT_WINDOW)
+                ctl["aimer"] = Aimer(AsyncGimbal(GIMBAL_PORT, tilt_limits=TILT_WINDOW or TILT_RANGE), tilt_window=TILT_WINDOW, tilt_enabled=TILT_ON)
                 if TILT_WINDOW:
                     engage.scan_tilt = ctl["aimer"].tilt_center
                 ctl["aimer"].sign.update(DEFAULT_SIGNS)

@@ -45,10 +45,11 @@ class Aimer:
 
     def __init__(self, gimbal, mode="map", gain=(0.2, 0.2), deadband=1.0, max_step=8.0, smooth=0.35, fast_ramp=12.0,
                  map_start=2.0, map_stop=0.6, span=(PAN_RANGE[1] - PAN_RANGE[0], TILT_RANGE[1] - TILT_RANGE[0]),
-                 tilt_window=None):
+                 tilt_window=None, tilt_enabled=True):
         """tilt_window=(lo, hi): the tilt servo's usable travel when the whole range does not fit the mechanics. The
         picture's height maps onto just this window, its middle is the tilt 'center', and the aim never leaves it."""
         self.gimbal = gimbal
+        self.tilt_enabled = tilt_enabled      # False = pan only: the tilt servo is never commanded
         lo, hi = tilt_window if tilt_window else TILT_RANGE
         self.tilt_clamp = (lo, hi)
         self.tilt_center = (lo + hi) / 2
@@ -97,7 +98,7 @@ class Aimer:
         pan, tilt = (clamp(self._goal[0], PAN_RANGE), clamp(self._goal[1], self.tilt_clamp))
         # only command an axis once it is off by more than the deadband, so a still target means a still servo
         new_pan = pan if self._gate("pan", abs(pan - self.gimbal.pan)) else None
-        new_tilt = tilt if self._gate("tilt", abs(tilt - self.gimbal.tilt)) else None
+        new_tilt = tilt if (self.tilt_enabled and self._gate("tilt", abs(tilt - self.gimbal.tilt))) else None
         self.settled = new_pan is None and new_tilt is None
         return self.gimbal.move_to(pan=new_pan, tilt=new_tilt)
 
@@ -117,7 +118,8 @@ class Aimer:
         return max(-self.max_step, min(self.max_step, step))
 
     def _follow(self, ex, ey):
-        step_pan, step_tilt = self._follow_step("pan", ex, H_FOV), self._follow_step("tilt", ey, V_FOV)
+        step_pan = self._follow_step("pan", ex, H_FOV)
+        step_tilt = self._follow_step("tilt", ey, V_FOV) if self.tilt_enabled else 0.0
         self.settled = step_pan == 0 and step_tilt == 0
         pan = clamp(self.gimbal.pan + step_pan, PAN_RANGE)
         tilt = clamp(self.gimbal.tilt + step_tilt, self.tilt_clamp)

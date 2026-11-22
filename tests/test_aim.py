@@ -213,6 +213,19 @@ def test_tilt_window():
     print("tilt window ok")
 
 
+def test_pan_only():
+    """tilt_enabled=False: pan tracks as usual and the tilt servo is never sent anything."""
+    for mode in ("map", "follow"):
+        g = SimGimbal(target=90)
+        a = Aimer(g, mode=mode, tilt_window=(0, 45), tilt_enabled=False)
+        for _ in range(60):
+            a.update(0.6, -0.8)
+        assert abs(g.pan - 90) > 20, "pan still follows the target"
+        assert all(t == CENTER[1] for _, t in g.sent), (mode, set(t for _, t in g.sent))
+    print("pan-only ok")
+
+
 if __name__ == "__main__":
     test()
     test_tilt_window()
+    test_pan_only()
