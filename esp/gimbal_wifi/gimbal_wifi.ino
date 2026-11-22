@@ -1,7 +1,7 @@
 // Wi-Fi version of gimbal.ino: same pins, same commands, same replies; commands arrive as UDP packets
 // (port 4210) as well as over USB serial. Replies go back to whoever sent the command.
 //
-// Commands (one per packet / line):  P<0-180> pan   T<90-180> tilt   C center   S status
+// Commands (one per packet / line):  P<0-180> pan   T<0-60> tilt   C center   S status
 //                                    R distance in mm ("R-1" = no sensor / no reading)   I sensor model
 // Reply: "P<pan> T<tilt>" (or "R<mm>", "I <model>") or "ERR ...".
 #include <Arduino.h>
@@ -13,9 +13,12 @@
 
 const uint16_t UDP_PORT = 4210;
 const int PAN_PIN = 19, TILT_PIN = 18;
+// The tilt servo's travel with our bracket is about 0-45 degrees (the old firmware used 90-180, which pushes this arm into
+// the bracket). The firmware itself refuses to go outside TILT_MIN..TILT_MAX, so a software mistake cannot jam the arm.
+const int TILT_MIN = 0, TILT_MAX = 60, TILT_HOME = 22;
 
 Servo panServo, tiltServo;
-int panAngle = 90, tiltAngle = 135;
+int panAngle = 90, tiltAngle = TILT_HOME;
 WiFiUDP udp;
 char serialBuf[16];
 size_t serialUsed = 0;
@@ -36,7 +39,7 @@ String runCommand(const char *cmd) {
   size_t n = strlen(cmd);
   if (strcmp(cmd, "C") == 0) {
     panAngle = 90;
-    tiltAngle = 135;
+    tiltAngle = TILT_HOME;
     moveServo(panServo, panAngle);
     moveServo(tiltServo, tiltAngle);
   } else if (strcmp(cmd, "S") == 0) {
@@ -50,7 +53,7 @@ String runCommand(const char *cmd) {
       panAngle = constrain(angle, 0, 180);
       moveServo(panServo, panAngle);
     } else {
-      tiltAngle = constrain(angle, 90, 180);
+      tiltAngle = constrain(angle, TILT_MIN, TILT_MAX);
       moveServo(tiltServo, tiltAngle);
     }
   } else if (strcmp(cmd, "R") == 0) {

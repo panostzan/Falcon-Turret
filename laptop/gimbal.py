@@ -15,8 +15,9 @@ from collections import deque
 import serial
 
 PAN_RANGE = (0, 180)
-TILT_RANGE = (90, 180)       # firmware rejects tilt below 90
-CENTER = (90, 135)
+TILT_RANGE = (0, 60)         # the bracket allows about 0-45; the firmware clamps tilt to this too (old firmware: 90-180)
+TILT_HOME = 22               # the firmware's start position for tilt
+CENTER = (90, TILT_HOME)
 _REPLY = re.compile(r"P(\d+)\s+T(\d+)")
 
 

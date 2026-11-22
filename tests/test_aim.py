@@ -5,7 +5,10 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "laptop"))
 from aim import H_FOV, V_FOV, Aimer, pixel_error_to_degrees   # noqa: E402
-from gimbal import PAN_RANGE, TILT_RANGE                       # noqa: E402
+from gimbal import CENTER, PAN_RANGE, TILT_RANGE               # noqa: E402
+
+T_LO, T_HI = TILT_RANGE
+T_MID = (T_LO + T_HI) / 2
 
 
 class SimGimbal:
@@ -14,7 +17,7 @@ class SimGimbal:
     `direction=-1` models a servo that turns the wrong way relative to the image."""
 
     def __init__(self, target, direction=1, delay=0):
-        self.pan, self.tilt, self.target, self.direction = 90, 135, target, direction
+        self.pan, self.tilt, self.target, self.direction = 90, CENTER[1], target, direction
         self.history = [90] * (delay + 1)
         self.sent = []
 
@@ -65,7 +68,7 @@ def test_map():
     a.update(0.0, 0.0)                                  # target back at the center -> straight ahead
     for _ in range(20):
         a.update(0.0, 0.0)
-    assert abs(g.pan - 90) <= 2.5 and abs(g.tilt - 135) <= 2.5, (g.pan, g.tilt)   # within the hold-still band
+    assert abs(g.pan - 90) <= 2.5 and abs(g.tilt - T_MID) <= 2.5, (g.pan, g.tilt)   # within the hold-still band
 
     for ex in (-1.0, -0.5, 0.25, 1.0):                  # symmetric, bounded, and monotonic mapping
         g = SimGimbal(90)
@@ -74,11 +77,11 @@ def test_map():
             a.update(ex, 0.0)
         assert abs(g.pan - (90 + ex * 90)) <= 1.5, (ex, g.pan)
 
-    g = SimGimbal(90)                                   # tilt maps around 135 and stays in 90-180
+    g = SimGimbal(90)                                   # tilt maps around the middle of its range and stays in it
     a = Aimer(g)
     for _ in range(30):
         a.update(0.0, 1.0)
-    assert abs(g.tilt - 180) <= 1.5 and in_range(g)
+    assert abs(g.tilt - T_HI) <= 1.5 and in_range(g)
 
     g = SimGimbal(90)                                   # Flip reverses the direction
     a = Aimer(g)
@@ -101,7 +104,7 @@ def test_map():
         for _ in range(40):
             a.update(ex, 0.0)
         assert abs(g.pan - want) <= 1.5, f"x={ex}: pan {g.pan}, want {want}"
-    for ey, want in ((-1.0, 90), (1.0, 180), (0.0, 135)):   # ...and the whole tilt range
+    for ey, want in ((-1.0, T_LO), (1.0, T_HI), (0.0, T_MID)):   # ...and the whole tilt range
         g = SimGimbal(90)
         a = Aimer(g)
         for _ in range(40):
@@ -161,7 +164,7 @@ def test():
     run(g, flip=True)
     assert abs(g.pan - 130) <= 3
 
-    g = SimGimbal(90)                                 # tilt can't leave 90-180 either
+    g = SimGimbal(90)                                 # tilt can't leave its range either
     a = Aimer(g, mode="follow")
     for _ in range(40):
         a.update(0.0, -1.0)
@@ -173,7 +176,7 @@ def test():
     g = SimGimbal(90)
     a = Aimer(g, mode="follow")
     a.update(0.02, -0.03)                             # under 1 degree: ignored
-    assert g.sent[-1] == (90, 135)
+    assert g.sent[-1] == (90, CENTER[1])
     before = g.sent[-1]
     a.update(1.0, 1.0)                                # huge error: step capped
     assert abs(g.sent[-1][0] - before[0]) <= a.max_step + 1 and abs(g.sent[-1][1] - before[1]) <= a.max_step + 1
@@ -181,30 +184,31 @@ def test():
 
 
 def test_tilt_window():
-    """A tilt window (140-180): bottom of the picture = 180, top = 140, middle = 160; the aim never leaves the window."""
+    """A tilt window (0-45, the bracket's travel): bottom of the picture = 45, top = 0, middle = 22.5; never outside it."""
     g = SimGimbal(target=90)
-    a = Aimer(g, tilt_window=(140, 180))
+    a = Aimer(g, tilt_window=(0, 45))
     a.sign["tilt"] = 1
-    assert a.tilt_center == 160 and a.span["tilt"] == 40
-    for ey, expect in ((1.0, 180), (-1.0, 140), (0.0, 160), (0.5, 170)):
+    assert a.tilt_center == 22.5 and a.span["tilt"] == 45
+    for ey, expect in ((1.0, 45), (-1.0, 0), (0.0, 22.5), (0.5, 33.75)):
         a.reset()
+        a._goal = None
         a.update(0.0, ey)
         assert abs(g.tilt - expect) <= 1.0, (ey, g.tilt, expect)
     for ey in (-5.0, 5.0, 0.3, -0.7):                      # even a wild reading stays inside the window
         a.reset()
         a.update(0.0, ey)
-        assert 140 <= g.tilt <= 180, g.tilt
-    f = Aimer(g, mode="follow", tilt_window=(140, 180))
+        assert 0 <= g.tilt <= 45, g.tilt
+    f = Aimer(g, mode="follow", tilt_window=(0, 45))
     for _ in range(300):
-        f.update(0.0, 1.0)                                 # follow mode pushes down for a long time: it stops at 180
-    assert g.tilt == 180, g.tilt
+        f.update(0.0, 1.0)                                 # follow mode pushes down for a long time: it stops at 45
+    assert g.tilt == 45, g.tilt
     for _ in range(300):
         f.update(0.0, -1.0)
-    assert g.tilt == 140, g.tilt
+    assert g.tilt == 0, g.tilt
     a.home()
-    assert g.tilt == 160 and g.pan == 90, (g.pan, g.tilt)
-    full = Aimer(SimGimbal(target=90))                     # without a window nothing changes: the whole 90-180 range
-    assert full.tilt_center == 135 and full.tilt_clamp == (90, 180)
+    assert abs(g.tilt - 22.5) <= 1 and g.pan == 90, (g.pan, g.tilt)
+    full = Aimer(SimGimbal(target=90))                     # without a window: the whole range the firmware allows
+    assert full.tilt_center == T_MID and full.tilt_clamp == TILT_RANGE
     print("tilt window ok")
 
 

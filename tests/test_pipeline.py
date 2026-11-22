@@ -132,16 +132,16 @@ def test():
     test_moving()
     # mirrored picture: a box at source x=480 appears at x=160 (left of center) -> pan below 90
     pan, tilt, ms, _ = run(480, 360)
-    assert abs(pan - 45) <= 3 and abs(tilt - 170) <= 3, (pan, tilt)
+    assert abs(pan - 45) <= 3 and abs(tilt - 34) <= 3, (pan, tilt)
     # box on the other side
     pan, tilt, ms2, _ = run(160, 120)
-    assert abs(pan - 135) <= 3 and abs(tilt - 150) <= 3, (pan, tilt)
+    assert abs(pan - 135) <= 3 and abs(tilt - 11) <= 3, (pan, tilt)
     # no mirror: x maps straight through
     pan, tilt, _, _ = run(480, 240, mirror=False)
-    assert abs(pan - 135) <= 3 and abs(tilt - 160) <= 3, (pan, tilt)
+    assert abs(pan - 135) <= 3 and abs(tilt - 22.5) <= 3, (pan, tilt)
     # centered box -> straight ahead
     pan, tilt, _, _ = run(320, 240, mirror=False)
-    assert abs(pan - 90) <= 2 and abs(tilt - 160) <= 2, (pan, tilt)
+    assert abs(pan - 90) <= 2 and abs(tilt - 22.5) <= 2, (pan, tilt)
     # the color-match view tints the accepted pixels
     app.view.update(mask=True)
     app.tracker.use_preset("teal")

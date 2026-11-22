@@ -2,12 +2,12 @@
 
     python tools/tilt_watch.py            opens the window (the dashboard server must not be tracking: it would hold the port)
 
-  Up / Down arrows      move 1 degree           PageUp / PageDown   move 5 degrees        Home   go to 135
+  Up / Down arrows      move 1 degree           PageUp / PageDown   move 5 degrees        Home   go to 22
   Sweep button          goes back and forth between the Low and High boxes, 1 degree at a time
   "Mark low" / "Mark high"   write down the current angle as the end you found (shown at the bottom and in the log)
   Esc                   quit (the servo stays where it is)
 
-The firmware only accepts tilt 90-180. Watch the servo, and note the commanded angle where it starts to move, where it jams
+The firmware only accepts tilt 0-60. Watch the servo, and note the commanded angle where it starts to move, where it jams
 or hums, and which end of the picture each end is. Every command is also written to captures/tilt_watch.log.
 """
 import os
@@ -23,7 +23,7 @@ LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "captures",
 class TiltControl:
     """The logic without any window, so it can be tested: current angle, limits, jogging and the back-and-forth sweep."""
 
-    def __init__(self, gimbal, start=135, lo=TILT_RANGE[0], hi=TILT_RANGE[1], log=None):
+    def __init__(self, gimbal, start=22, lo=TILT_RANGE[0], hi=TILT_RANGE[1], log=None):
         self.g, self.lo, self.hi, self.angle, self.direction = gimbal, lo, hi, start, 1
         self.log, self.sweeping, self.marks = log, False, {}
 
@@ -43,8 +43,8 @@ class TiltControl:
         """Low and high ends of the sweep. The firmware only takes 90-180, so anything outside is clamped to that range
         (typing 0 and 90 gives a sweep of 90 to 90, which is no sweep at all: sweep_step then refuses to move)."""
         lo, hi = int(lo), int(hi)
-        self.lo = max(TILT_RANGE[0], min(lo, hi))
-        self.hi = min(TILT_RANGE[1], max(lo, hi))
+        clamp = lambda v: max(TILT_RANGE[0], min(TILT_RANGE[1], v))
+        self.lo, self.hi = clamp(min(lo, hi)), clamp(max(lo, hi))
 
     def sweep_step(self):
         """One step of the back-and-forth sweep: ALWAYS exactly one degree (or none). Turns around at the limits. If the
@@ -88,7 +88,7 @@ def run_window(port):
     root.geometry("560x420")
     big = tk.Label(root, text="…", font=("Consolas", 64, "bold"), fg="#b6e23a", bg="#14170f")
     big.pack(pady=(14, 0))
-    tk.Label(root, text="commanded tilt, degrees (the firmware accepts 90 to 180)", fg="#8b9777", bg="#14170f").pack()
+    tk.Label(root, text="commanded tilt, degrees (the firmware accepts 0 to 60)", fg="#8b9777", bg="#14170f").pack()
     canvas = tk.Canvas(root, width=500, height=46, bg="#0a0d07", highlightthickness=0)
     canvas.pack(pady=10)
     status = tk.Label(root, text="opening the port (this resets the ESP)...", fg="#dfe6cf", bg="#14170f")
@@ -151,10 +151,10 @@ def run_window(port):
     tk.Button(both, text="Mark low", command=lambda: mark("low")).grid(row=0, column=0, padx=6)
     tk.Button(both, text="Mark high", command=lambda: mark("high")).grid(row=0, column=1, padx=6)
     marks.pack(pady=6)
-    tk.Label(root, text="Up/Down = 1 degree   PageUp/PageDown = 5   Home = 135   Esc = quit", fg="#8b9777", bg="#14170f").pack()
+    tk.Label(root, text="Up/Down = 1 degree   PageUp/PageDown = 5   Home = 22   Esc = quit", fg="#8b9777", bg="#14170f").pack()
     for key, d in (("<Up>", 1), ("<Down>", -1), ("<Prior>", 5), ("<Next>", -5)):
         root.bind(key, jog(d))
-    root.bind("<Home>", lambda e: (state["ctl"].jog(135 - state["ctl"].angle), draw()))
+    root.bind("<Home>", lambda e: (state["ctl"].jog(22 - state["ctl"].angle), draw()))
     root.bind("<Escape>", lambda e: root.destroy())
 
     try:

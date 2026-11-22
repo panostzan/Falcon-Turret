@@ -48,9 +48,9 @@ latest = {"jpg": None, "seq": 0, "state": {"connected": False, "fps": 0, "kb": 0
 tracker = ColorTracker()
 # This turret's servo directions (+1 = angle grows as the target goes right / down in the picture). Tilt is -1: tested
 # on the real turret, the other way pointed the wrong direction. The dashboard's Flip buttons change these live.
-# The tilt servo's usable travel (degrees). The picture height maps onto it: bottom of the picture = the high end (180), top = the low
-# end (140), middle = 160. Override with TILT_WINDOW="140,180"; "full" uses the whole 90-180 range and the older sign.
-_tw = os.environ.get("TILT_WINDOW", "140,180")
+# The tilt servo's usable travel (degrees). The picture height maps onto it: bottom of the picture = the high end (45), top = the low
+# end (0), middle = 22.5. Override with TILT_WINDOW="0,45"; "full" uses the whole 90-180 range and the older sign.
+_tw = os.environ.get("TILT_WINDOW", "0,45")
 TILT_WINDOW = None if _tw == "full" else tuple(int(v) for v in _tw.split(","))
 DEFAULT_SIGNS = {"pan": 1, "tilt": 1 if TILT_WINDOW else -1}
 view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False, "smooth": True, "depthcheck": False, "cutout": False, "fadestale": False, "qnx": True}   # flip the picture so it matches the real world (set from the dashboard)

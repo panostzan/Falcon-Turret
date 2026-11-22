@@ -11,13 +11,13 @@ class FakeESP:
     """Mirrors gimbal.ino's command handling."""
 
     def __init__(self):
-        self.pan, self.tilt, self.out, self.log = 90, 135, b"", []
+        self.pan, self.tilt, self.out, self.log = 90, 22, b"", []
 
     def write(self, data):
         cmd = data.decode().strip()
         self.log.append(cmd)
         if cmd == "C":
-            self.pan, self.tilt = 90, 135
+            self.pan, self.tilt = 90, 22
         elif cmd == "S":
             pass
         elif cmd[:1] in "PT" and len(cmd) > 1 and cmd[1:].isdigit() and len(cmd) <= 4:
@@ -25,7 +25,7 @@ class FakeESP:
             if cmd[0] == "P":
                 self.pan = max(0, min(180, v))
             else:
-                self.tilt = max(90, min(180, v))
+                self.tilt = max(0, min(60, v))
         else:
             self.out += b"ERR unknown command\n" if cmd[:1] not in "PT" else b"ERR invalid angle\n"
             return
@@ -60,9 +60,9 @@ def test_udp():
     threading.Thread(target=serve, daemon=True).start()
     from gimbal import UdpLink
     g = Gimbal(link=UdpLink("127.0.0.1", port, timeout=1))
-    assert g.status() == (90, 135)
-    assert g.move_to(pan=120, tilt=160) == (120, 160)
-    assert g.center() == (90, 135)
+    assert g.status() == (90, 22)
+    assert g.move_to(pan=120, tilt=40) == (120, 40)
+    assert g.center() == (90, 22)
     try:
         g._send("X")
         raise SystemExit("expected GimbalError")
@@ -96,8 +96,8 @@ def test_async():
     assert len(esp.log) < 30, f"slow ESP should skip intermediate angles, got {len(esp.log)} commands"
     g.move_to(pan=500, tilt=0)                    # clamped, like the sync driver
     time.sleep(0.2)
-    assert (esp.pan, esp.tilt) == (180, 90) and g.error is None
-    assert g.center() == (90, 135)
+    assert (esp.pan, esp.tilt) == (180, 0) and g.error is None
+    assert g.center() == (90, 22)
     g.close()
     print("async gimbal tests passed")
 
@@ -105,16 +105,16 @@ def test_async():
 def test():
     esp = FakeESP()
     g = Gimbal(link=esp)
-    assert g.status() == (90, 135)
-    assert g.move_to(pan=120) == (120, 135)
-    assert g.move_to(tilt=200) == (120, 180), "tilt clamps to 180"
-    assert g.move_to(tilt=10) == (120, 90), "tilt clamps to 90 (firmware minimum)"
-    assert g.move_to(pan=-50) == (0, 90), "pan clamps to 0"
-    assert g.nudge(d_pan=10, d_tilt=5) == (10, 95)
+    assert g.status() == (90, 22)
+    assert g.move_to(pan=120) == (120, 22)
+    assert g.move_to(tilt=200) == (120, 60), "tilt clamps to 60"
+    assert g.move_to(tilt=-10) == (120, 0), "tilt clamps to 0"
+    assert g.move_to(pan=-50) == (0, 0), "pan clamps to 0"
+    assert g.nudge(d_pan=10, d_tilt=5) == (10, 5)
     esp.log.clear()
-    g.move_to(pan=10, tilt=95)
+    g.move_to(pan=10, tilt=5)
     assert esp.log == [], "no-op moves send nothing"
-    assert g.center() == (90, 135)
+    assert g.center() == (90, 22)
     try:
         g._send("X")
         raise SystemExit("expected GimbalError")

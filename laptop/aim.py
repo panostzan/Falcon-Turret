@@ -51,7 +51,7 @@ class Aimer:
         self.gimbal = gimbal
         lo, hi = tilt_window if tilt_window else TILT_RANGE
         self.tilt_clamp = (lo, hi)
-        self.tilt_center = (lo + hi) / 2 if tilt_window else CENTER[1]
+        self.tilt_center = (lo + hi) / 2
         if tilt_window:
             span = (span[0], hi - lo)
         self.mode = mode

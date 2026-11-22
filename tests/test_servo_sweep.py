@@ -10,7 +10,7 @@ import servo_sweep as sw   # noqa: E402
 
 class FakeGimbal:
     def __init__(self):
-        self.pan, self.tilt, self.log, self.closed = 90, 135, [], False
+        self.pan, self.tilt, self.log, self.closed = 90, 22, [], False
 
     def move_to(self, pan=None, tilt=None):
         if pan is not None:
@@ -37,25 +37,26 @@ def test():
     assert sum(1 for a, b in zip(sent, sent[1:]) if b == 180 and a != 180) == 3, "reaches 180 three times"
     assert sum(1 for a, b in zip([None] + sent, sent) if b == 0 and a != 0) >= 3, "returns to 0 each time"
     assert all(abs(b - a) <= 2 for a, b in zip([90] + sent, sent)), "no jump bigger than one step, even from the start position"
-    assert g.tilt == 135, "the pan sweep never touches tilt"
+    assert g.tilt == 22, "the pan sweep never touches tilt"
     assert g.pan == 90, "ends in the middle"
 
-    g = FakeGimbal()                                        # tilt stays inside its window, and ramps in from 135
-    sent = sw.sweep_axis(g, "tilt", 140, 180, 3, 2, 0, sleep=lambda s: None, say=lambda *a: None)
-    assert min(sent) >= 135 and max(sent) == 180
-    assert all(140 <= a <= 180 for a in sent[3:]), "once at the start of the window it never leaves it"
-    assert g.pan == 90 and g.tilt == 160
+    g = FakeGimbal()                                        # tilt stays inside its window
+    sent = sw.sweep_axis(g, "tilt", 0, 45, 3, 2, 0, sleep=lambda s: None, say=lambda *a: None)
+    assert min(sent) == 0 and max(sent) == 45
+    assert all(0 <= a <= 45 for a in sent), "never outside the window"
+    assert all(abs(b - a) <= 2 for a, b in zip([22] + sent, sent))
+    assert g.pan == 90 and g.tilt == 22
 
-    g = FakeGimbal()                                        # the whole program, with --full and fewer round trips
+    g = FakeGimbal()                                        # the whole program, with a wider tilt range and one round trip
     import io
     import contextlib
     with contextlib.redirect_stdout(io.StringIO()) as out:
         sw.time.sleep = lambda s: None                      # no real waiting in the test
-        sw.main(["--cycles", "1", "--axis", "tilt", "--full"], gimbal=g)
-    assert min(a for _, a in g.log) == 90 and max(a for _, a in g.log) == 180 and g.closed
+        sw.main(["--cycles", "1", "--axis", "tilt", "--tilt", "0,60"], gimbal=g)
+    assert min(a for _, a in g.log) == 0 and max(a for _, a in g.log) == 60 and g.closed
     assert "done" in out.getvalue()
 
-    for bad in (["--cycles", "0"], ["--step", "50"], ["--delay", "0"]):
+    for bad in (["--cycles", "0"], ["--step", "50"], ["--delay", "0"], ["--tilt", "90,180"], ["--tilt", "30,10"], ["--tilt", "x"]):
         try:
             sw.main(bad, gimbal=FakeGimbal())
             raise AssertionError("bad option accepted: " + str(bad))
