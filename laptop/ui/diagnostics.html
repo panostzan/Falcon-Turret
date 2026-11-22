@@ -15,7 +15,7 @@
   .col .grow { flex: 1 1 0; min-height: 0; }
 
   .banner { grid-column: 1 / -1; display: flex; align-items: center; gap: 22px; padding: 14px 20px; background: var(--panel); border: 1px solid var(--line); border-left: 6px solid var(--dim); }
-  .banner .word { font: 400 30px/1 var(--font); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+  .banner .word { font: 700 30px/1 var(--font); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
   .banner .line { font-size: 16px; line-height: 1.35; color: var(--text); min-width: 0; }
   .banner.ok { border-left-color: var(--ok); } .banner.ok .word { color: var(--ok); }
   .banner.warn { border-left-color: var(--warn); } .banner.warn .word { color: var(--warn); }
@@ -26,9 +26,9 @@
   ul.systems li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; padding: 5px 0 5px 14px; border-top: 1px solid var(--line); border-left: 4px solid var(--line); margin-left: -4px; }
   ul.systems li:first-child { border-top: 0; }
   ul.systems li.ok { border-left-color: var(--ok); } ul.systems li.warn { border-left-color: var(--warn); } ul.systems li.bad { border-left-color: var(--alarm); }
-  ul.systems .nm { font: 500 14px var(--font); } ul.systems .nt { grid-column: 1; font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  ul.systems .vl { grid-row: 1 / span 2; grid-column: 2; font: 300 24px var(--font); text-align: right; white-space: nowrap; }
-  ul.systems li.warn .vl { color: var(--warn); } ul.systems li.bad .vl { color: var(--alarm); } ul.systems li.off .vl { color: var(--dim); font-size: 16px; } ul.systems li.off .nm { color: var(--dim); }
+  ul.systems .nm { font: 600 16px var(--font); } ul.systems .nt { grid-column: 1; font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  ul.systems .vl { grid-row: 1 / span 2; grid-column: 2; font: 600 21px var(--mono); text-align: right; white-space: nowrap; }
+  ul.systems li.warn .vl { color: var(--warn); } ul.systems li.bad .vl { color: var(--alarm); } ul.systems li.off .vl { color: var(--dim); font-size: 17px; } ul.systems li.off .nm { color: var(--dim); }
 
   /* needs attention */
   ol.issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 190px; overflow: auto; }
@@ -37,28 +37,28 @@
   ol.issues b { display: block; font-size: 16px; } ol.issues li.bad b { color: var(--alarm); } ol.issues li.warn b { color: var(--warn); }
   ol.issues .why { display: block; font-size: 14px; margin-top: 3px; line-height: 1.4; }
   ol.issues .fix { display: block; font-size: 14px; margin-top: 4px; color: var(--teal); }
-  .clear { padding: 4px 0; color: var(--ok); font: 600 16px var(--font); } .clear small { display: block; color: var(--dim); font: 400 14px var(--font); margin-top: 3px; }
+  .clear { padding: 4px 0; color: var(--ok); font: 600 17px var(--font); } .clear small { display: block; color: var(--dim); font: 400 14px var(--font); margin-top: 3px; }
 
   /* speed */
-  .lead { font-size: 14px; line-height: 1.4; margin: 0 0 12px; padding: 10px 14px; background: var(--raise); border-left: 4px solid var(--teal); }
+  .lead { font-size: 15px; line-height: 1.4; margin: 0 0 12px; padding: 10px 14px; background: var(--raise); border-left: 4px solid var(--teal); }
   .lead b { color: var(--teal); font-weight: 600; }
   .sub-h { font-size: 13px; color: var(--dim); margin: 0 0 6px; display: flex; justify-content: space-between; gap: 10px; }
   .sub-h b { color: var(--text); font-weight: 500; text-align: right; }
   .gapbox { flex: 1; min-height: 90px; position: relative; margin-bottom: 12px; }
   .gapbox canvas { position: absolute; inset: 0; width: 100%; height: 100% !important; margin: 0 !important; }
-  .budget { display: flex; height: 24px; background: #060606; border: 1px solid var(--line); }
+  .budget { display: flex; height: 24px; background: #0a0d07; border: 1px solid var(--line); }
   .budget i { display: block; height: 100%; min-width: 3px; }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 14px; margin: 7px 0 12px; color: var(--dim); }
   .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; background: var(--c); }
   .legend b { color: var(--text); font-weight: 500; font-family: var(--mono); }
   .cmp { display: grid; gap: 6px; font-size: 14px; margin-bottom: 4px; }
   .cmp div { display: grid; grid-template-columns: 100px minmax(0, 1fr) 245px; align-items: center; gap: 10px; }
-  .cmp .track { height: 12px; background: #060606; border: 1px solid var(--line); } .cmp .track i { display: block; height: 100%; }
+  .cmp .track { height: 12px; background: #0a0d07; border: 1px solid var(--line); } .cmp .track i { display: block; height: 100%; }
   .cmp .val { text-align: right; font: 13px var(--mono); white-space: nowrap; } .cmp .dim { color: var(--dim); }
 
   /* events and readings */
   .events { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 5px; font-size: 14px; }
-  .events div { display: flex; gap: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .events span { color: var(--dim); font-family: var(--mono); font-size: 13px; width: 88px; flex: none; }
+  .events div { display: flex; gap: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .events span { color: var(--dim); font-family: var(--mono); font-size: 13px; width: 62px; flex: none; }
   details.more { margin-top: 10px; font-size: 14px; } details.more summary { cursor: pointer; color: var(--dim); }
   details.more table { width: 100%; margin-top: 6px; } details.more th { text-align: left; color: var(--dim); font-weight: 400; padding: 2px 0; } details.more td { text-align: right; font-family: var(--mono); font-size: 13px; }
   details.more td.na { color: var(--dim); }
@@ -188,10 +188,10 @@ function assess() {
 function budget() {
   const s = S, q = s.qnx || {}, rtt = q.rtt || {}, st = TEL ? TEL.stats : null;
   const parts = [];
-  if (q.used && q.proc_ms != null) parts.push(['QNX tracking', q.proc_ms, '#e8793a']);
-  if (rtt.udp && rtt.udp.n) parts.push(['Control link', rtt.udp.p50, '#e3b341']);
-  if (st && st.proc_ms && st.proc_ms.n) parts.push(['Laptop processing', st.proc_ms.p50, '#8a8a8a']);
-  if (TEL && TEL.servo_rtt_ms != null) parts.push(['Servo command', TEL.servo_rtt_ms, '#9db4c0']);
+  if (q.used && q.proc_ms != null) parts.push(['QNX tracking', q.proc_ms, '#b6e23a']);
+  if (rtt.udp && rtt.udp.n) parts.push(['Control link', rtt.udp.p50, '#ffb000']);
+  if (st && st.proc_ms && st.proc_ms.n) parts.push(['Laptop processing', st.proc_ms.p50, '#8b9777']);
+  if (TEL && TEL.servo_rtt_ms != null) parts.push(['Servo command', TEL.servo_rtt_ms, '#4fd6c4']);
   return parts;
 }
 
@@ -204,15 +204,15 @@ function drawGap(canvas, values) {
   const vals = (values || []).filter(v => v != null);
   const padL = 52, top = 6, bottom = 4, max = Math.max(250, ...vals) * 1.08;
   const y = v => top + (H - top - bottom) * (1 - v / max);
-  g.fillStyle = 'rgba(227,179,65,0.10)'; g.fillRect(padL, y(max), W - padL, y(150) - y(max));          // the slow zone
+  g.fillStyle = 'rgba(255,176,0,0.10)'; g.fillRect(padL, y(max), W - padL, y(150) - y(max));          // the slow zone
   g.font = '12px Consolas, monospace'; g.textBaseline = 'middle'; g.lineWidth = 1;
   for (const t of [0, 100, 200, 300, 400].filter(t => t <= max)) {
-    g.strokeStyle = '#262628'; g.beginPath(); g.moveTo(padL, y(t)); g.lineTo(W, y(t)); g.stroke();
-    g.fillStyle = '#8a8a8a'; g.fillText(t + ' ms', 2, y(t));
+    g.strokeStyle = '#333b27'; g.beginPath(); g.moveTo(padL, y(t)); g.lineTo(W, y(t)); g.stroke();
+    g.fillStyle = '#8b9777'; g.fillText(t + ' ms', 2, y(t));
   }
-  g.fillStyle = '#e3b341'; g.textAlign = 'right'; g.fillText('slow', W - 6, y(150) - 9); g.textAlign = 'left';
-  if (vals.length < 2) { g.fillStyle = '#8a8a8a'; g.fillText('waiting for pictures…', padL + 12, H / 2); return; }
-  g.strokeStyle = '#d6d6d6'; g.lineWidth = 1.8; g.beginPath();
+  g.fillStyle = '#ffb000'; g.textAlign = 'right'; g.fillText('slow', W - 6, y(150) - 9); g.textAlign = 'left';
+  if (vals.length < 2) { g.fillStyle = '#8b9777'; g.fillText('waiting for pictures…', padL + 12, H / 2); return; }
+  g.strokeStyle = '#b6e23a'; g.lineWidth = 1.8; g.beginPath();
   vals.forEach((v, i) => { const px = padL + (W - padL) * i / (vals.length - 1); i ? g.lineTo(px, y(v)) : g.moveTo(px, y(v)); });
   g.stroke();
 }
@@ -248,10 +248,10 @@ function render() {
   $('gap-now').textContent = gap ? `typical ${ms(gap.p50)}, slowest 5%: ${ms(gap.p95)}` : '–';
   $('budget-total').textContent = parts.length ? `about ${ms(total)}` : 'waiting for data';
   $('budget').innerHTML = parts.map(([n, v, c]) => `<i title="${n}" style="width:${Math.max(1, v / total * 100)}%;background:${c}"></i>`).join('');
-  $('budget-legend').innerHTML = parts.map(([n, v, c]) => `<span style="--c:${c}">${n} <b>${ms(v)}</b></span>`).join('') || '<span style="--c:#262628">no control-loop data yet</span>';
+  $('budget-legend').innerHTML = parts.map(([n, v, c]) => `<span style="--c:${c}">${n} <b>${ms(v)}</b></span>`).join('') || '<span style="--c:#333b27">no control-loop data yet</span>';
   const cmpMax = Math.max(1, (rtt.udp && rtt.udp.p95) || 0, (rtt.stream && rtt.stream.p95) || 0);
   const bar = (label, r, color) => r && r.n ? `<div><span>${label}</span><span class="track"><i style="width:${Math.max(2, r.p95 / cmpMax * 100)}%;background:${color}"></i></span><span class="val">${ms(r.p50)} typical, ${ms(r.p95)} slowest</span></div>` : `<div><span>${label}</span><span class="track"></span><span class="val dim">no data</span></div>`;
-  $('cmp').innerHTML = bar('Own channel', rtt.udp, '#e8793a') + bar('Inside video', rtt.stream, '#e3b341');
+  $('cmp').innerHTML = bar('Own channel', rtt.udp, '#b6e23a') + bar('Inside video', rtt.stream, '#ffb000');
 
   const rd = (k, v, cls) => `<tr><th>${k}</th><td class="${cls || ''}">${v}</td></tr>`;
   const cam = s.camera || {};

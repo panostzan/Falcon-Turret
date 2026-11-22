@@ -36,7 +36,7 @@ function drawChart(canvas, sets, range) {
   const g = canvas.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
   let [lo, hi] = range || [0, undefined];
   if (hi === undefined) { const all = sets.flatMap(s => s.v).filter(x => x != null); hi = Math.max(1, ...all) * 1.15; }
-  g.strokeStyle = '#2a2a2c'; g.lineWidth = 1; g.beginPath();
+  g.strokeStyle = '#39434b'; g.lineWidth = 1; g.beginPath();
   for (let i = 1; i < 4; i++) { g.moveTo(0, H * i / 4); g.lineTo(W, H * i / 4); } g.stroke();
   for (const s of sets) {
     g.strokeStyle = s.color; g.lineWidth = 1.6; g.beginPath(); let pen = false;
