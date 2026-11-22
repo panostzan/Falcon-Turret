@@ -105,12 +105,6 @@
   </section>
 
   <div class="side">
-    <section class="panel">
-      <h2>Real-time test</h2>
-      <button class="stressbtn" id="stress">Overload the Pi</button>
-      <div class="seg"><button id="rt-on" class="sel">Tracker real-time 30</button><button id="rt-off">Normal 10</button></div>
-      <div class="cap" id="stress-cap">Starts 8 programs that burn the CPU. Stops by itself after 3 minutes.</div>
-    </section>
     <section class="panel grow">
       <h2>The Pi, live</h2>
       <div id="meters"></div>
@@ -130,9 +124,6 @@ const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', 
 const DEADLINE_MS = 30;                         // one picture at 30 fps: the tracker should be done well before the next
 let lastQ = null, prev = {};
 
-$('stress').onclick = () => api.post('/stress?on=' + (lastQ && lastQ.stress.on ? 0 : 1));
-$('rt-on').onclick = () => api.post('/rt?on=1');
-$('rt-off').onclick = () => api.post('/rt?on=0');
 
 /* ---- events: only things that change, newest first ---- */
 const events = [];
@@ -250,14 +241,6 @@ function render(q) {
   const r = live ? Math.min(12, fps) : 0;
   rates = [r, r, d.present ? r : 0, ang ? 8 : 0, ang ? 8 : 0];
 
-  // the test controls
-  const btn = $('stress');
-  btn.classList.toggle('on', st.on);
-  btn.textContent = st.on ? `Stop overload (${st.seconds} s)` : 'Overload the Pi';
-  $('rt-on').classList.toggle('sel', rt); $('rt-off').classList.toggle('sel', !rt);
-  $('stress-cap').textContent = st.on ? (rt ? 'The tracker is at priority 30: watch it keep its time.' : 'The tracker is at priority 10: it now shares the CPU with the overload.') :
-    'Starts 8 programs that burn the CPU. Stops by itself after 3 minutes.';
-
   // ladder and readings
   renderLanes(sys);
   $('meters').innerHTML = sys ?
@@ -272,8 +255,6 @@ function render(q) {
   $('miss-note').textContent = trace.length ? `${miss} of the last ${trace.length} pictures over ${DEADLINE_MS} ms` : ' ';
 
   // events
-  watch('stress', st.on, on => (on ? 'Overload started: 8 programs' : 'Overload stopped'));
-  watch('rt', rt, on => (on ? 'Tracker raised to priority 30' : 'Tracker lowered to priority 10'));
   watch('state', d.state, s => (s ? `Mission: ${s}` : null));
   watch('link', d.link, ok => (ok ? 'Laptop link restored' : 'Laptop link lost: tracker disarmed itself'));
   watch('pi', !!sys, ok => (ok ? 'Pi report received' : 'Pi report lost'));
