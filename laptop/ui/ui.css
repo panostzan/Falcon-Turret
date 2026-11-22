@@ -83,6 +83,7 @@ small, .dim { color: var(--dim); }
 
 .nosignal { position: absolute; inset: 0; z-index: 4; display: grid; place-content: center; gap: 10px; text-align: center; padding: 20px;
   background: rgba(10, 12, 7, .82); }
+.nosignal[hidden] { display: none; }          /* the display above would otherwise win over the hidden attribute */
 .nosignal b { font-size: 26px; letter-spacing: .25em; color: var(--alarm); }
 .nosignal span { color: var(--text); max-width: 460px; }
 
