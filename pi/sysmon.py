@@ -61,21 +61,28 @@ def parse_top(text):
     return out
 
 
-def summarize(parsed, limit=6):
-    """The one-line report: totals plus the busiest programs (a program's threads are added together; its priority is its highest)."""
+def summarize(parsed, limit=8):
+    """The one-line report: totals plus the busiest programs. A program's threads are added together (its priority is its highest);
+    programs with the same name and priority are grouped ("python3 x8"), so a pile of identical ones is one entry."""
     procs = {}
     for r in parsed["rows"]:
         p = procs.setdefault(r["pid"], {"name": r["name"], "pid": r["pid"], "prio": r["prio"], "cpu": 0.0})
         p["cpu"] += r["cpu"]
-        p["prio"] = max(p["prio"], r["prio"]) if r["name"] != "kernel" else p["prio"]
-    top = sorted(procs.values(), key=lambda p: -p["cpu"])[:limit]
+        if r["name"] != "kernel":
+            p["prio"] = max(p["prio"], r["prio"])
+    groups = {}
+    for p in procs.values():
+        g = groups.setdefault((p["name"], p["prio"]), {"name": p["name"], "prio": p["prio"], "cpu": 0.0, "n": 0})
+        g["cpu"] += p["cpu"]
+        g["n"] += 1
+    top = sorted(groups.values(), key=lambda g: -g["cpu"])[:limit]
     tracker = next((p for p in procs.values() if p["name"] == TRACKER), None)
     used = None if parsed["mem_total"] is None else parsed["mem_total"] - parsed["mem_avail"]
     return {"cpus": parsed["cpus"], "procs": parsed["processes"], "threads": parsed["threads"],
             "cpu": None if parsed["user"] is None else round(parsed["user"] + parsed["kernel"], 1),
             "mem_used": used, "mem_total": parsed["mem_total"],
             "tracker_prio": tracker["prio"] if tracker else None,
-            "top": [{"name": p["name"], "pid": p["pid"], "prio": p["prio"], "cpu": round(p["cpu"], 1)} for p in top]}
+            "top": [{"name": g["name"], "n": g["n"], "prio": g["prio"], "cpu": round(g["cpu"], 1)} for g in top]}
 
 
 class Stress:

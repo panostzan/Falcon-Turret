@@ -325,6 +325,10 @@ class FrameFeed:
         best = min(self._offsets)                                    # lowest round trip = most trustworthy offset
         return (arrival - (best[1] + stamp / 1000.0)) * 1000.0
 
+    def tracker_trace(self, n=150):
+        """The tracker's time per picture (ms) for the last n answers, oldest first."""
+        return [round(v, 2) for _, v in list(self.proc_log)[-n:]]
+
     def tracker_timing(self, window=10.0):
         """How long the QNX tracker took per picture over the last `window` seconds (ms): median, 95th percentile, worst, and the count."""
         now = time.time()
@@ -490,6 +494,9 @@ class CameraFeed:
 
     def tracker_timing(self, window=10.0):
         return None
+
+    def tracker_trace(self, n=150):
+        return []
 
     def wait_meta(self, after_t_ms, timeout=0.5):
         time.sleep(timeout)

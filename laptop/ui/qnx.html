@@ -4,55 +4,74 @@
 <title>Turret QNX</title>
 <link rel="stylesheet" href="/ui.css">
 <style>
-  .qnx { flex: 1; min-height: 0; display: grid; gap: 10px; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-  .qnx .panel { min-height: 0; min-width: 0; overflow: hidden; padding: 10px 14px; display: flex; flex-direction: column; }
-  .col { display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
-  .col .panel { flex: 1 1 0; }
-  .qnx h2 { margin-bottom: 8px; }
-  .lead { font-size: 12.5px; color: var(--dim); line-height: 1.35; margin: 0 0 8px; }
+  /* Three bands: the data path (what happens to one picture), the priority ladder (who runs first), the deadline trace (does the
+     tracker keep its time). Every label has room and ellipsises instead of overlapping. */
+  .qnx { flex: 1; min-height: 0; display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: auto minmax(0, 1.5fr) minmax(0, 1fr); }
+  .qnx .panel { min-width: 0; min-height: 0; overflow: hidden; padding: 12px 16px; display: flex; flex-direction: column; }
+  .qnx h2 { margin: 0 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .qnx h2 small { font: 400 12.5px var(--font); letter-spacing: 0; text-transform: none; color: var(--dim); }
+  .qnx .panel > * { flex-shrink: 0; }
+  .wide { grid-column: 1 / -1; grid-row: 1; min-height: 150px; overflow: visible; }
+  .ladder { grid-column: 1; grid-row: 2; }
+  .deadline { grid-column: 1; grid-row: 3; }
 
-  .stressbtn { font: 700 15px var(--font); letter-spacing: .12em; text-transform: uppercase; padding: 12px 14px; cursor: pointer; border: 1px solid var(--line);
+  /* the data path */
+  .chain { position: relative; display: flex; align-items: stretch; }
+  .chain canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; background: transparent !important; border: 0 !important; margin: 0 !important; }
+  .node { flex: 0 0 150px; min-width: 0; padding: 8px 10px; background: var(--raise); border: 1px solid var(--line); border-top: 3px solid var(--line); text-align: center; }
+  .node.onpi { border-top-color: var(--teal); }
+  .node .tag { font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node .nm { font: 600 14px var(--font); margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node .val { font: 600 20px/1.15 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node .sub { font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node.hot { border-color: var(--teal); }
+  .link { flex: 1 1 0; min-width: 56px; position: relative; align-self: stretch; }
+  .link::before { content: ""; position: absolute; left: 0; right: 0; top: 56%; height: 2px; background: var(--line); }
+  .link span { position: absolute; left: 0; right: 0; top: 4px; text-align: center; font: 500 12px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .link.air span { color: var(--teal); }
+  .link.off::before { background: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 12px); }
+
+  /* the ladder */
+  .lanes { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+  .lane { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: center; background: var(--raise);
+          border: 1px solid var(--line); padding: 4px 12px; }
+  .lane .who { min-width: 0; }
+  .lane .who b { font: 700 22px/1 var(--mono); }
+  .lane .who span { display: block; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lane.rt { border-left: 4px solid var(--teal); } .lane.rt .who b { color: var(--teal); }
+  .lane.busy { border-color: var(--alarm); box-shadow: inset 0 0 0 1px var(--alarm); }
+  .track { display: flex; gap: 4px; height: 100%; min-height: 28px; align-items: stretch; overflow: hidden; }
+  .chip { flex: 0 0 auto; min-width: 0; display: flex; align-items: center; padding: 0 10px; background: #2a3120; border: 1px solid var(--line);
+          font: 500 13px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: flex-basis .5s; }
+  .chip.ours { background: var(--teal); color: var(--teal-ink); border-color: var(--teal); font-weight: 700; }
+  .chip.pile { background: var(--alarm); border-color: var(--alarm); color: #fff; }
+  .none { color: var(--dim); font-size: 12.5px; align-self: center; }
+
+  /* the controls and the Pi readings */
+  .side .panel { flex: none; }
+  .side { display: flex; flex-direction: column; gap: 10px; min-height: 0; grid-column: 2; grid-row: 2 / span 2; }
+  .side .panel.grow { flex: 1 1 0; }
+  .lanes, .tracewrap { flex-shrink: 1 !important; }
+  .stressbtn { font: 700 15px var(--font); letter-spacing: .1em; text-transform: uppercase; padding: 11px 12px; cursor: pointer; border: 1px solid var(--line);
                background: var(--raise); color: var(--text); width: 100%; }
   .stressbtn:hover { border-color: var(--teal); }
   .stressbtn.on { background: var(--alarm); border-color: var(--alarm); color: #fff; }
-  .rtrow { display: flex; align-items: center; gap: 10px; margin: 8px 0 2px; font-size: 12.5px; }
-  .rtrow .seg { display: inline-flex; border: 1px solid var(--line); }
-  .rtrow .seg button { font: 600 12px var(--font); padding: 5px 10px; border: 0; background: var(--raise); color: var(--dim); cursor: pointer; }
-  .rtrow .seg button.sel { background: var(--teal); color: var(--teal-ink); }
+  .seg { display: flex; margin-top: 8px; border: 1px solid var(--line); }
+  .seg button { flex: 1; font: 600 12.5px var(--font); padding: 7px 6px; border: 0; background: var(--raise); color: var(--dim); cursor: pointer; }
+  .seg button.sel { background: var(--teal); color: var(--teal-ink); }
+  .cap { font-size: 11.5px; color: var(--dim); margin-top: 8px; line-height: 1.35; }
+  .gauge { margin: 0 0 9px; } .gauge .row { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--dim); }
+  .gauge .row b { color: var(--text); font-family: var(--mono); font-weight: 500; white-space: nowrap; }
+  .gauge .bar { height: 10px; background: #0a0d07; border: 1px solid var(--line); margin-top: 3px; }
+  .gauge .bar i { display: block; height: 100%; background: var(--teal); transition: width .4s; } .gauge.hot .bar i { background: var(--alarm); }
+  .events { list-style: none; margin: 0; padding: 0; overflow: hidden; font-size: 12.5px; display: flex; flex-direction: column; gap: 3px; }
+  .events li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .events li i { font-style: normal; color: var(--dim); font-family: var(--mono); margin-right: 8px; }
 
-  .duel { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
-  .card { background: var(--raise); border: 1px solid var(--line); border-top: 3px solid var(--line); padding: 8px 10px; min-width: 0; }
-  .card.good { border-top-color: var(--ok); } .card.slow { border-top-color: var(--alarm); }
-  .card .who { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
-  .card .num { font: 600 28px/1.1 var(--mono); margin: 3px 0; }
-  .card.slow .num { color: var(--alarm); } .card.good .num { color: var(--ok); }
-  .card .was { font-size: 12px; color: var(--dim); }
-  .card .was b { color: var(--text); font-weight: 500; }
-  .verdictline { margin-top: 10px; padding: 9px 12px; background: var(--raise); border-left: 3px solid var(--dim); font-size: 13px; line-height: 1.35; }
-  .verdictline.good { border-left-color: var(--ok); }
-  .chartbox { flex: 1; min-height: 60px; display: flex; flex-direction: column; margin-top: 6px; }
-  .chartbox canvas { flex: 1; min-height: 0; height: 100%; }
-  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--dim); }
-  .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 6px; background: var(--c); }
-
-  .meter { margin: 0 0 9px; }
-  .meter .row { display: flex; justify-content: space-between; font-size: 12px; color: var(--dim); }
-  .meter .row b { color: var(--text); font-family: var(--mono); font-weight: 500; }
-  .meter .bar { height: 12px; background: #0a0d07; border: 1px solid var(--line); margin-top: 3px; }
-  .meter .bar i { display: block; height: 100%; background: var(--teal); transition: width .4s; }
-  .meter.hot .bar i { background: var(--alarm); }
-  table.procs { width: 100%; font-size: 12.5px; border-collapse: collapse; }
-  table.procs th { text-align: left; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); font-weight: 500; padding: 2px 0; }
-  table.procs td { padding: 3px 0; border-top: 1px solid var(--line); font-family: var(--mono); }
-  table.procs td.n { font-family: var(--font); } table.procs .r { text-align: right; }
-  table.procs tr.ours td { color: var(--teal); }
-  table.procs .rt { color: var(--teal-ink); background: var(--teal); padding: 0 5px; font-size: 11px; }
-
-  .bigrtt { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; }
-  .kv span:nth-child(odd) { color: var(--dim); } .kv span:nth-child(even) { text-align: right; font-family: var(--mono); }
-  .gone { flex: 1; display: grid; place-content: center; text-align: center; color: var(--dim); }
-  @media (max-width: 1000px) { html, body { height: auto; } .qnx { grid-template-columns: 1fr; grid-template-rows: none; } }
+  /* the deadline trace */
+  .tracewrap { flex: 1; min-height: 0; position: relative; }
+  .tracewrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  @media (max-width: 1000px) { html, body { height: auto; } .qnx { grid-template-columns: 1fr; grid-template-rows: none; } .wide, .ladder, .deadline, .side { grid-column: 1; grid-row: auto; } .chain { overflow-x: auto; } .tracewrap { min-height: 160px; } }
+  @media (prefers-reduced-motion: reduce) { .chip { transition: none; } }
 </style>
 
 <header class="top">
@@ -62,122 +81,204 @@
 </header>
 
 <main class="qnx">
-  <div class="col">
+  <section class="panel wide">
+    <h2>One picture’s journey <small id="path-note">from the camera to the servos, with measured times</small></h2>
+    <div class="chain" id="chain">
+      <canvas id="packets"></canvas>
+      <div class="node" id="n-cam"><div class="tag">USB webcam</div><div class="nm">Camera</div><div class="val" id="v-cam">–</div><div class="sub" id="s-cam">&nbsp;</div></div>
+      <div class="link" id="l-1"><span>USB</span></div>
+      <div class="node onpi" id="n-str"><div class="tag" id="t-str">QNX · priority 20</div><div class="nm">Streamer</div><div class="val" id="v-str">–</div><div class="sub">JPEG encode</div></div>
+      <div class="link" id="l-2"><span>frames</span></div>
+      <div class="node onpi" id="n-trk"><div class="tag" id="t-trk">QNX · priority 30</div><div class="nm">Tracker</div><div class="val" id="v-trk">–</div><div class="sub">per picture, in C</div></div>
+      <div class="link air" id="l-3"><span id="x-udp">UDP</span></div>
+      <div class="node" id="n-lap"><div class="tag">Windows laptop</div><div class="nm">Aim loop</div><div class="val" id="v-lap">–</div><div class="sub" id="s-lap">&nbsp;</div></div>
+      <div class="link" id="l-4"><span id="x-usb">USB</span></div>
+      <div class="node" id="n-fea"><div class="tag">Feather M0</div><div class="nm">Servo driver</div><div class="val" id="v-fea">–</div><div class="sub" id="s-fea">&nbsp;</div></div>
+      <div class="link" id="l-5"><span>I²C</span></div>
+      <div class="node" id="n-ser"><div class="tag">PCA9685</div><div class="nm">Servos</div><div class="val">3 axes</div><div class="sub">pan · tilt · lift</div></div>
+    </div>
+  </section>
+
+  <section class="panel ladder">
+    <h2>Who runs first <small>QNX gives the CPU to the highest priority</small></h2>
+    <div class="lanes" id="lanes"></div>
+  </section>
+
+  <div class="side">
     <section class="panel">
       <h2>Real-time test</h2>
-      <p class="lead">Overload the Pi with 8 programs that burn the CPU. QNX shares time by priority: the tracker runs at <b>30</b>, everything else at <b>10</b>, so the tracker keeps its timing while the rest slows down.</p>
       <button class="stressbtn" id="stress">Overload the Pi</button>
-      <div class="rtrow">Tracker priority <span class="seg"><button id="rt-on" class="sel">Real-time 30</button><button id="rt-off">Normal 10</button></span></div>
-      <div class="duel">
-        <div class="card" id="card-tr"><div class="who">Tracker, per picture</div><div class="num" id="tr-now">–</div><div class="was" id="tr-was">&nbsp;</div></div>
-        <div class="card" id="card-vid"><div class="who">Video, pictures per second</div><div class="num" id="vid-now">–</div><div class="was" id="vid-was">&nbsp;</div></div>
-      </div>
-      <div class="verdictline" id="verdict">Press the button to start. It stops by itself after 3 minutes.</div>
+      <div class="seg"><button id="rt-on" class="sel">Tracker real-time 30</button><button id="rt-off">Normal 10</button></div>
+      <div class="cap" id="stress-cap">Starts 8 programs that burn the CPU. Stops by itself after 3 minutes.</div>
     </section>
-    <section class="panel">
-      <h2>Over the last minute</h2>
-      <div class="legend"><span style="--c:#b6e23a">Tracker ms (median)</span><span style="--c:#ffb000">Pi CPU %</span></div>
-      <div class="chartbox"><canvas id="chart"></canvas></div>
+    <section class="panel grow">
+      <h2>The Pi, live</h2>
+      <div id="meters"></div>
+      <ul class="events" id="events"></ul>
     </section>
   </div>
 
-  <div class="col">
-    <section class="panel" id="pi-panel">
-      <h2>QNX on the Pi, live</h2>
-      <div id="pi-body"><div class="gone">Waiting for the Pi…</div></div>
-    </section>
-  </div>
-
-  <div class="col">
-    <section class="panel">
-      <h2>Fast control channel</h2>
-      <div class="bigrtt">
-        <div class="card good"><div class="who">Own UDP channel</div><div class="num" id="rtt-udp">–</div><div class="was" id="rtt-udp-s">&nbsp;</div></div>
-        <div class="card"><div class="who">Inside the video stream</div><div class="num" id="rtt-ssh">–</div><div class="was" id="rtt-ssh-s">&nbsp;</div></div>
-      </div>
-      <p class="lead">Aiming runs on the UDP answers: small messages go straight back to the laptop and never wait behind a video picture.</p>
-    </section>
-    <section class="panel">
-      <h2>What the tracker decides</h2>
-      <div class="kv" id="decide"></div>
-    </section>
-  </div>
+  <section class="panel deadline">
+    <h2>Does the tracker keep its deadline? <small id="miss-note">&nbsp;</small></h2>
+    <div class="tracewrap"><canvas id="trace"></canvas></div>
+  </section>
 </main>
 
 <script src="/ui.js"></script>
 <script>
-const hist = { tr: [], cpu: [] };
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const DEADLINE_MS = 30;                         // one picture at 30 fps: the tracker should be done well before the next
+let lastQ = null, prev = {};
 
 $('stress').onclick = () => api.post('/stress?on=' + (lastQ && lastQ.stress.on ? 0 : 1));
 $('rt-on').onclick = () => api.post('/rt?on=1');
 $('rt-off').onclick = () => api.post('/rt?on=0');
-let lastQ = null;
 
-function meter(label, value, text, hot) {
-  return `<div class="meter ${hot ? 'hot' : ''}"><div class="row"><span>${label}</span><b>${text}</b></div><div class="bar"><i style="width:${Math.max(0, Math.min(100, value))}%"></i></div></div>`;
+/* ---- events: only things that change, newest first ---- */
+const events = [];
+function log(text) {
+  const t = new Date().toTimeString().slice(0, 8);
+  events.unshift([t, text]); events.length = Math.min(events.length, 6);
+  $('events').innerHTML = events.map(e => `<li><i>${e[0]}</i>${esc(e[1])}</li>`).join('');
+}
+function watch(key, value, describe) {
+  if (prev[key] !== undefined && prev[key] !== value) { const t = describe(value); if (t) log(t); }
+  prev[key] = value;
+}
+
+/* ---- the ladder ---- */
+const LANES = [
+  { id: 'k', min: 100, num: '255', name: 'Kernel and drivers' },
+  { id: 'rt', min: 30, num: '30', name: 'Real-time: the tracker' },
+  { id: 'mid', min: 15, num: '20', name: 'Our streamer and network' },
+  { id: 'n', min: 0, num: '10', name: 'Ordinary programs' },
+];
+const laneOf = prio => LANES.find(l => prio >= l.min).id;
+function renderLanes(sys) {
+  const el = $('lanes');
+  if (!sys) { el.innerHTML = '<div class="none">Waiting for the Pi’s report…</div>'; return; }
+  const total = (sys.cpus || 4) * 100, groups = {};
+  for (const p of sys.top) (groups[laneOf(p.prio)] = groups[laneOf(p.prio)] || []).push(p);
+  el.innerHTML = LANES.map(l => {
+    const ps = (groups[l.id] || []).filter(p => p.cpu >= 0.5);
+    const sum = ps.reduce((a, p) => a + p.cpu, 0);
+    const chips = ps.map(p => {
+      const pile = p.n >= 3 && p.name !== 'kernel', ours = p.name === 'turretd';
+      const w = Math.max(17, p.cpu / total * 100 * 2.2);                      // a little wider than the strict share, so small ones stay readable
+      return `<div class="chip ${ours ? 'ours' : ''} ${pile ? 'pile' : ''}" style="flex-basis:${Math.min(w, 70)}%" title="${esc(p.name)}: ${p.cpu}% of one core, summed over ${p.n} program(s)">${esc(p.name)}${p.n > 1 ? ' ×' + p.n : ''} · ${p.cpu.toFixed(0)}%</div>`;
+    }).join('');
+    return `<div class="lane ${l.id === 'rt' ? 'rt' : ''} ${l.id === 'n' && sum > 250 ? 'busy' : ''}"><div class="who"><b>${l.num}</b><span>${l.name}</span></div><div class="track">${chips || '<span class="none">nothing using the CPU</span>'}</div></div>`;
+  }).join('');
+}
+
+/* ---- the deadline trace ---- */
+function drawTrace(values) {
+  const c = $('trace'), dpr = window.devicePixelRatio || 1, W = c.clientWidth || 400, H = c.clientHeight || 120;
+  c.width = W * dpr; c.height = H * dpr;
+  const g = c.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
+  const padL = 46, padB = 4, top = 8, max = Math.max(45, ...values) * 1.1;
+  const y = v => top + (H - top - padB) * (1 - v / max);
+  g.font = '12px Consolas, monospace'; g.textBaseline = 'middle';
+  g.strokeStyle = '#333b27'; g.fillStyle = '#8b9777'; g.lineWidth = 1;
+  for (const t of [0, 10, 20, 30, 40].filter(t => t < max)) { g.beginPath(); g.moveTo(padL, y(t)); g.lineTo(W, y(t)); g.stroke(); g.fillText(t + ' ms', 2, y(t)); }
+  g.setLineDash([6, 4]); g.strokeStyle = '#ffb000'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(padL, y(DEADLINE_MS)); g.lineTo(W, y(DEADLINE_MS)); g.stroke(); g.setLineDash([]);
+  g.fillStyle = '#ffb000'; g.textAlign = 'right'; g.fillText('deadline', W - 4, y(DEADLINE_MS) - 9); g.textAlign = 'left';
+  if (values.length < 2) { g.fillStyle = '#8b9777'; g.fillText('waiting for pictures…', padL + 10, H / 2); return; }
+  const x = i => padL + (W - padL) * i / Math.max(1, values.length - 1);
+  g.lineWidth = 2; g.strokeStyle = '#b6e23a'; g.beginPath();
+  values.forEach((v, i) => (i ? g.lineTo(x(i), y(v)) : g.moveTo(x(i), y(v)))); g.stroke();
+  g.fillStyle = '#ff4b2b';
+  values.forEach((v, i) => { if (v > DEADLINE_MS) { g.beginPath(); g.arc(x(i), y(v), 3, 0, 7); g.fill(); } });
+}
+
+/* ---- the moving pictures along the path ---- */
+const packets = [];
+let spawn = [0, 0, 0, 0, 0], rates = [0, 0, 0, 0, 0], PAUSED = false;
+const LINKS = ['l-1', 'l-2', 'l-3', 'l-4', 'l-5'];
+function frame(now) {
+  const c = $('packets'), chain = $('chain'), dpr = window.devicePixelRatio || 1;
+  const W = chain.clientWidth, H = chain.clientHeight, dt = Math.min(0.1, (now - (frame.t || now)) / 1000); frame.t = now;
+  if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const base = chain.getBoundingClientRect();
+  const rects = LINKS.map(id => { const r = $(id).getBoundingClientRect(); return { x0: r.left - base.left, x1: r.right - base.left, y: r.top - base.top + r.height * 0.56 + 1 }; });
+  if (!PAUSED) {
+    rates.forEach((r, i) => { spawn[i] += r * dt; while (spawn[i] >= 1) { spawn[i] -= 1; packets.push({ link: i, p: 0 }); } });
+    for (const k of packets) k.p += dt * 0.9;                                  // a packet crosses a link in about a second
+  }
+  for (let i = packets.length - 1; i >= 0; i--) if (packets[i].p > 1) packets.splice(i, 1);
+  for (const k of packets) {
+    const r = rects[k.link]; if (!r) continue;
+    g.fillStyle = k.link === 2 ? '#b6e23a' : '#dfe6cf'; g.globalAlpha = Math.max(0.15, Math.min(1, 3 * k.p, 3 * (1 - k.p) + .2));
+    g.fillRect(r.x0 + (r.x1 - r.x0) * k.p - 3, r.y - 3, 7, 7);
+  }
+  g.globalAlpha = 1;
+  requestAnimationFrame(frame);
+}
+try { PAUSED = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+requestAnimationFrame(frame);
+
+/* ---- everything else ---- */
+const f1 = (x, n = 1) => (x == null || Number.isNaN(Number(x)) ? '–' : Number(x).toFixed(n));
+function gauge(label, value, text, hot) {
+  return `<div class="gauge ${hot ? 'hot' : ''}"><div class="row"><span>${label}</span><b>${text}</b></div><div class="bar"><i style="width:${Math.max(0, Math.min(100, value || 0))}%"></i></div></div>`;
 }
 
 function render(q) {
   lastQ = q;
-  const sys = q.system, st = q.stress, tm = q.timing, vid = q.video;
-  // the demo
+  const sys = q.system, st = q.stress, tm = q.timing, vid = q.video, d = q.qnx || {}, gim = q.gimbal || {};
+  const rt = sys ? sys.rt : true;
+  // the path
+  const fps = vid ? vid.fps : (q.wire ? q.wire.fps : null);
+  $('v-cam').textContent = fps == null ? '–' : f1(fps, 0) + ' /s';
+  $('s-cam').textContent = q.camera && q.camera.state === 'ok' ? 'pictures per second' : (q.camera && q.camera.state !== 'unknown' ? q.camera.state : ' ');
+  $('v-str').textContent = vid ? f1(vid.encode_ms) + ' ms' : '–';
+  $('v-trk').textContent = tm ? f1(tm.p50) + ' ms' : '–';
+  $('t-trk').textContent = 'QNX · priority ' + (sys && sys.tracker_prio != null ? sys.tracker_prio : '–');
+  $('n-trk').classList.toggle('hot', !!(tm && st.on));
+  const u = q.rtt && q.rtt.udp && q.rtt.udp.p50 != null ? q.rtt.udp.p50 : null;
+  $('x-udp').textContent = u == null ? 'UDP' : 'UDP ' + f1(u) + ' ms';
+  $('v-lap').textContent = d.present ? d.state : '–';
+  $('s-lap').textContent = d.present ? (d.armed ? 'ARMED' : 'disarmed') : 'no answer';
+  const ang = gim.angles;
+  $('v-fea').textContent = ang ? `P${ang[0]} T${ang[1]}` : 'idle';
+  $('s-fea').textContent = ang ? (gim.rtt != null ? 'reply ' + f1(gim.rtt) + ' ms' : 'tracking') : 'not tracking';
+  $('x-usb').textContent = ang ? 'USB serial' : 'USB';
+  $('l-4').classList.toggle('off', !ang); $('l-5').classList.toggle('off', !ang);
+  const live = !!(fps && q.camera && q.camera.state !== 'stalled');
+  const r = live ? Math.min(12, fps) : 0;
+  rates = [r, r, d.present ? r : 0, ang ? 8 : 0, ang ? 8 : 0];
+
+  // the test controls
   const btn = $('stress');
   btn.classList.toggle('on', st.on);
-  btn.textContent = st.on ? `Stop overload (running ${st.seconds} s)` : 'Overload the Pi';
-  const rt = sys ? sys.rt : true;
+  btn.textContent = st.on ? `Stop overload (${st.seconds} s)` : 'Overload the Pi';
   $('rt-on').classList.toggle('sel', rt); $('rt-off').classList.toggle('sel', !rt);
-  const trNow = tm ? tm.p50 : null;
-  $('tr-now').textContent = trNow == null ? '–' : trNow.toFixed(1) + ' ms';
-  $('tr-was').innerHTML = tm ? `95th <b>${tm.p95.toFixed(1)}</b> · worst <b>${tm.max.toFixed(1)}</b> ms` + (st.on && st.baseline ? ` · calm was <b>${st.baseline.p50.toFixed(1)}</b>` : '') : '&nbsp;';
-  $('vid-now').textContent = vid ? vid.fps.toFixed(1) : '–';
-  $('vid-was').innerHTML = st.on && st.baseline_fps != null ? `calm was <b>${st.baseline_fps.toFixed(1)}</b> per second` : '&nbsp;';
-  const slowTr = st.on && st.baseline && tm && tm.p50 > st.baseline.p50 * 2 + 1;
-  const slowVid = st.on && st.baseline_fps && vid && vid.fps < st.baseline_fps * 0.75;
-  $('card-tr').className = 'card ' + (st.on ? (slowTr ? 'slow' : 'good') : '');
-  $('card-vid').className = 'card ' + (st.on ? (slowVid ? 'slow' : 'good') : '');
-  const v = $('verdict');
-  if (!st.on) { v.className = 'verdictline'; v.textContent = 'Press the button to start. It stops by itself after 3 minutes.'; }
-  else if (!sys) { v.className = 'verdictline'; v.textContent = 'Waiting for the Pi’s report…'; }
-  else if (rt) {
-    v.className = 'verdictline ' + (slowTr ? '' : 'good');
-    v.textContent = slowTr ? 'The tracker slowed down even at priority 30. Something else is wrong: check the Pi.' :
-      `The Pi is at ${sys.cpu}% CPU and the tracker still answers in ${trNow == null ? '–' : trNow.toFixed(1)} ms: real-time priority keeps it on schedule` + (slowVid ? ` while the video drops to ${vid.fps.toFixed(1)} fps.` : '.');
-  } else {
-    v.className = 'verdictline';
-    v.textContent = slowTr ? 'At normal priority the tracker has to share the CPU, so it slows down. Switch to Real-time 30 and watch it recover.' : 'Waiting for the overload to bite…';
-  }
-  // history
-  hist.tr.push(trNow); hist.cpu.push(sys ? sys.cpu : null);
-  for (const k in hist) if (hist[k].length > 60) hist[k].shift();
-  drawChart($('chart'), [{ v: hist.tr, color: '#b6e23a' }, { v: hist.cpu.map(x => (x == null ? null : x / 10)), color: '#ffb000' }], [0, 12]);
+  $('stress-cap').textContent = st.on ? (rt ? 'The tracker is at priority 30: watch it keep its time.' : 'The tracker is at priority 10: it now shares the CPU with the overload.') :
+    'Starts 8 programs that burn the CPU. Stops by itself after 3 minutes.';
 
-  // the Pi
-  if (!sys) { $('pi-body').innerHTML = '<div class="gone">Waiting for the Pi’s report…</div>'; }
-  else {
-    const mu = sys.mem_used, mt = sys.mem_total;
-    const rows = sys.top.map(p => `<tr class="${p.name === 'turretd' ? 'ours' : ''}"><td class="n">${esc(p.name)}</td><td class="r">${p.cpu.toFixed(1)}%</td><td class="r">${p.prio >= 30 && p.name !== 'kernel' ? `<span class="rt">${p.prio} RT</span>` : p.prio}</td></tr>`).join('');
-    $('pi-body').innerHTML =
-      meter(`CPU (${sys.cpus} cores)`, sys.cpu, sys.cpu.toFixed(0) + '%', sys.cpu > 85) +
-      meter('Memory', mt ? mu / mt * 100 : 0, mt ? `${mu} of ${mt} MB` : '–', false) +
-      `<div class="kv" style="margin-bottom:10px"><span>Programs / threads</span><span>${sys.procs} / ${sys.threads}</span><span>Tracker priority</span><span>${sys.tracker_prio == null ? '–' : sys.tracker_prio}</span>${sys.stress ? `<span>Overload programs</span><span>${sys.stress}</span>` : ''}</div>` +
-      `<table class="procs"><tr><th>Busiest programs</th><th class="r">CPU</th><th class="r">Priority</th></tr>${rows}</table>` +
-      `<p class="lead" style="margin-top:10px">Priority decides who runs when the CPU is full: higher wins. <b>turretd</b> is our tracker and fire interlock, written in C.</p>`;
-  }
-  // channel
-  const r = q.rtt || {};
-  const u = r.udp && r.udp.p50 != null ? r.udp : null, s = r.stream && r.stream.p50 != null ? r.stream : null;
-  $('rtt-udp').textContent = u ? u.p50.toFixed(1) + ' ms' : '–';
-  $('rtt-udp-s').innerHTML = u ? `95th <b>${u.p95.toFixed(0)}</b> ms` : '&nbsp;';
-  $('rtt-ssh').textContent = s ? s.p50.toFixed(0) + ' ms' : '–';
-  $('rtt-ssh-s').innerHTML = s ? `95th <b>${s.p95.toFixed(0)}</b> ms` : '&nbsp;';
-  const d = q.qnx || {};
-  $('decide').innerHTML = d.present ?
-    `<span>Mission state</span><span>${d.state}</span><span>Armed</span><span>${d.armed ? 'yes' : 'no'}</span><span>Shots (simulated)</span><span>${d.shots}</span>` +
-    `<span>Laptop link</span><span>${d.link ? 'alive' : 'lost: disarmed'}</span><span>Per picture</span><span>${d.proc_ms} ms</span><span>Used for aiming</span><span>${d.used ? 'yes' : 'no'}</span>` :
-    '<span>QNX</span><span>not answering</span>';
+  // ladder and readings
+  renderLanes(sys);
+  $('meters').innerHTML = sys ?
+    gauge(`CPU, ${sys.cpus} cores`, sys.cpu, f1(sys.cpu, 0) + '%', sys.cpu > 85) +
+    gauge('Memory', sys.mem_total ? sys.mem_used / sys.mem_total * 100 : 0, sys.mem_total ? `${sys.mem_used} of ${sys.mem_total} MB` : '–', false) +
+    `<div class="cap" style="margin:0 0 8px">${sys.procs} programs, ${sys.threads} threads</div>` : '<div class="cap">Waiting for the Pi’s report…</div>';
+
+  // the deadline trace
+  const trace = q.trace || [];
+  drawTrace(trace);
+  const miss = trace.filter(v => v > DEADLINE_MS).length;
+  $('miss-note').textContent = trace.length ? `${miss} of the last ${trace.length} pictures over ${DEADLINE_MS} ms` : ' ';
+
+  // events
+  watch('stress', st.on, on => (on ? 'Overload started: 8 programs' : 'Overload stopped'));
+  watch('rt', rt, on => (on ? 'Tracker raised to priority 30' : 'Tracker lowered to priority 10'));
+  watch('state', d.state, s => (s ? `Mission: ${s}` : null));
+  watch('link', d.link, ok => (ok ? 'Laptop link restored' : 'Laptop link lost: tracker disarmed itself'));
+  watch('pi', !!sys, ok => (ok ? 'Pi report received' : 'Pi report lost'));
 }
 
 poll('/state', 1000, setStatus);
 poll('/qnx.json', 1000, q => { if (q) render(q); });
+window.addEventListener('resize', () => { if (lastQ) drawTrace(lastQ.trace || []); });
 </script>

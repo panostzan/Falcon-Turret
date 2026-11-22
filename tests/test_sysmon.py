@@ -24,6 +24,9 @@ s = sysmon.summarize(p)
 check("summary: tracker found with its priority", s["tracker_prio"] == 10, str(s["tracker_prio"]))
 check("summary: programs added up, busiest first", [t["cpu"] for t in s["top"]] == sorted((t["cpu"] for t in s["top"]), reverse=True))
 check("summary: drm threads of one program merged", sum(1 for t in s["top"] if t["name"] == "drm-rpi5") <= 1)
+synth = {"rows": [{"pid": 100 + i, "tid": 1, "prio": 10, "state": "Run", "cpu": 12.0, "name": "python3"} for i in range(8)] + [{"pid": 7, "tid": 1, "prio": 30, "state": "SigW", "cpu": 3.0, "name": "turretd"}], "mem_total": 8000, "mem_avail": 7000, "user": 90.0, "kernel": 5.0, "cpus": 4, "processes": 9, "threads": 9}
+ss = sysmon.summarize(synth)
+check("summary: 8 identical programs become one entry, the tracker stays visible", any(t["name"] == "python3" and t["n"] == 8 and t["cpu"] == 96.0 for t in ss["top"]) and any(t["name"] == "turretd" and t["prio"] == 30 for t in ss["top"]), str(ss["top"]))
 check("odd output never raises", sysmon.summarize(sysmon.parse_top("garbage\n\x1b[H")) ["top"] == [])
 
 pushed = []

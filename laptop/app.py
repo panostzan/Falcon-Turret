@@ -166,6 +166,12 @@ def set_tracking(on):
             engage.arm(False, time.time())     # switching tracking off always disarms
             send_pi("arm 0")
             send_pi("track 0")
+            aimer, ctl["aimer"], ctl["angles"] = ctl["aimer"], None, None
+            if aimer is not None:              # let go of the Feather's port, so the sliders and the system check can use it
+                try:
+                    aimer.gimbal.close()
+                except Exception:
+                    pass
             return None
         try:
             if ctl["aimer"] is None:
@@ -283,6 +289,8 @@ def qnx_panel():
     fresh = bool(sysrep and time.time() - getattr(f, "pi_system_at", 0.0) < 5.0)
     return {"system": sysrep if fresh else None, "timing": f.tracker_timing(10.0) if f else None,
             "rtt": f.rtt() if (f and hasattr(f, "rtt")) else {}, "video": pi_video(), "qnx": qnx_summary(),
+            "trace": f.tracker_trace() if f else [], "wire": video_wire(), "camera": camera_summary(),
+            "gimbal": {"angles": ctl["angles"], "rtt": (lambda r: round(statistics.median(r), 1) if r else None)(list(ctl["aimer"].gimbal.rtt_ms) if ctl["aimer"] and hasattr(ctl["aimer"].gimbal, "rtt_ms") else [])},
             "stress": {"on": stress["on"], "seconds": round(time.time() - stress["since"]) if stress["on"] else 0,
                        "baseline": stress["baseline"], "baseline_fps": stress["baseline_fps"]}}
 
@@ -468,8 +476,9 @@ def process(jpg, ts=None):
             cv2.line(frame, pts[i - 1], pts[i], (int(60 + 195 * k), int(180 + 60 * k), int(40 + 120 * k)), 1 + int(3 * k), cv2.LINE_AA)
     if not found:
         info.update(speed=0.0, settled=False)
-        if ctl["aimer"]:
-            ctl["aimer"].reset()
+        a = ctl["aimer"]                 # (tracking may be switched off, and the aimer dropped, at any moment)
+        if a:
+            a.reset()
     send_pi(f"aim {1 if info['settled'] else 0} {info['speed']:.1f}")
     log_tracking_change(found, qs is not None if tracker.armed else False, tracker.confidence, now)
     tracking = ctl["tracking"] and tracker.armed
