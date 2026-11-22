@@ -111,8 +111,8 @@ const PRESETS = {
   depth: { box: 0, trail: 0, mask: 0, depth: 1 },
   clean: { box: 0, trail: 0, mask: 0, depth: 0 },
 };
-const STEPS = ['SEARCH', 'ACQUIRE', 'TRACK', 'LOCK', 'COOLDOWN'];
-const STEP_LABEL = { SEARCH: 'Search', ACQUIRE: 'Acquire', TRACK: 'Track', LOCK: 'Lock', COOLDOWN: 'Cooldown' };
+const STEPS = ['IDLE', 'SEARCH', 'ACQUIRE', 'TRACK', 'LOCK', 'COOLDOWN'];
+const STEP_LABEL = { IDLE: 'Idle', SEARCH: 'Search', ACQUIRE: 'Acquire', TRACK: 'Track', LOCK: 'Lock', COOLDOWN: 'Cooldown' };
 let S = null;                      // the latest state from the server
 
 /* layer buttons */
