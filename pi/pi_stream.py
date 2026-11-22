@@ -207,13 +207,24 @@ class Recording:
         self.path = None
         self.fd = None              # unbuffered read handle on the recording
         self.ready_at = None        # when the first full frame was available
+        self.dead = False           # the recorder exited (no camera) or never produced a file: the main loop starts a new one
 
     def latest(self):
         """Return index of the newest complete frame, or -1 if none yet."""
+        if self.proc.poll() is not None:                      # the recorder is gone: with no camera plugged in it exits at once
+            self.dead = True
+            return -1
         if not self.started and time.time() - self.born > 2:   # app waits for a keypress to begin
-            self.proc.stdin.write(b"\n")
-            self.proc.stdin.flush()
+            try:
+                self.proc.stdin.write(b"\n")
+                self.proc.stdin.flush()
+            except (BrokenPipeError, OSError):
+                self.dead = True
+                return -1
             self.started = True
+        if self.started and self.path is None and time.time() - self.born > 12:
+            self.dead = True                                  # it started but never made a file: give up on this one
+            return -1
         if self.started and self.path is None:
             new = set(glob.glob(DIR + "/VID_*.ucv")) - self._known
             self.path = new.pop() if new else None
@@ -280,6 +291,16 @@ def main():
     cur, nxt, last = Recording(), None, -1
     try:
         while True:
+            # A missing or silent camera is never a reason to quit: wait, and start a fresh recorder. When the camera comes
+            # back (replugged) pictures resume by themselves. Only a failed write to the laptop ends this program.
+            if nxt is not None and nxt.dead:
+                nxt.close()
+                nxt = None
+            if cur.dead or (time.time() - cur.born > 12 and time.time() - LAST_FRAME[0] > 8):
+                cur.close()
+                time.sleep(1.0)
+                cur, nxt, last = Recording(), None, -1
+                continue
             n = cur.latest()
             if nxt is None and cur.ready_at and time.time() - cur.ready_at > ROTATE_S:
                 nxt = Recording()
