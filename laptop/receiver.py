@@ -11,7 +11,19 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 USER = "qnxuser"
-PI_MAC = "88-a2-9e-a9-a5-4e"           # the Pi's hardware address; its IP changes when the hotspot restarts
+def _pi_mac():
+    """The Pi's hardware address (its IP changes when the hotspot restarts). Kept out of the repo: put it in laptop/pi_mac.txt
+    (git-ignored, like 88-aa-bb-cc-dd-ee) or in the TURRET_PI_MAC environment variable."""
+    v = os.environ.get("TURRET_PI_MAC", "")
+    if not v:
+        try:
+            v = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pi_mac.txt")).read()
+        except OSError:
+            v = ""
+    return v.strip().lower().replace(":", "-") or "00-00-00-00-00-00"
+
+
+PI_MAC = _pi_mac()
 FALLBACK_IP = "192.168.137.131"
 KEY = os.path.expanduser("~/.ssh/turret_ed25519")
 FPS, QUALITY = 30, int(os.environ.get("TURRET_QUALITY", "65"))   # recorder fps, JPEG quality (lower = smaller frames, faster)

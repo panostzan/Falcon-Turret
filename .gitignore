@@ -10,3 +10,5 @@ captures/
 esp/gimbal_wifi/wifi_config.h
 # downloaded neural-network models (large, re-downloadable)
 models/
+# the Pi's hardware address (kept private)
+laptop/pi_mac.txt
