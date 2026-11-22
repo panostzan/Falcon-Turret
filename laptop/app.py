@@ -86,6 +86,55 @@ def qnx_status():
     return f.qnx_fresh()
 
 
+SRC_W, SRC_H = 640, 480            # the Pi's picture size: the tracker on QNX reports positions in it
+
+
+def qnx_aim_active():
+    """True when aiming is driven by the tracker's answers as they arrive (not by video frames): tracking is on, the QNX
+    tracker is in use and answering."""
+    return bool(ctl["tracking"] and ctl["aimer"] and qnx_status() is not None)
+
+
+def qnx_aim_step(m, aimer):
+    """One aiming step from a turretd status: returns the gimbal's angles, or None when no target was found (the aimer is
+    reset, as the picture loop does). Mirror and vertical flip are applied to the position the same way as to the picture."""
+    if not m["found"]:
+        aimer.reset()
+        info.update(speed=0.0, settled=False)
+        return None
+    cx = SRC_W - m["cx"] if view["mirror"] else m["cx"]
+    cy = SRC_H - m["cy"] if view["vflip"] else m["cy"]
+    angles = aimer.update((cx - SRC_W / 2) / (SRC_W / 2), (cy - SRC_H / 2) / (SRC_H / 2))
+    info["settled"] = aimer.settled
+    return angles
+
+
+def qnx_aim_loop():
+    """Aims the moment the Pi's answer arrives, on its own thread. The picture loop keeps drawing, but it no longer waits for
+    a video frame (which can be 100 ms to seconds late on this Wi-Fi) before the gimbal is told to move."""
+    last = -1.0
+    while True:
+        f = feed_ref["feed"]
+        if f is None:
+            time.sleep(0.2)
+            continue
+        m = f.wait_meta(last, timeout=0.5)
+        if m is None:
+            continue
+        last = m["t_ms"]
+        if not qnx_aim_active():
+            continue
+        try:
+            with ctl_lock:
+                if ctl["tracking"] and ctl["aimer"]:
+                    angles = qnx_aim_step(m, ctl["aimer"])
+                    if angles is not None:
+                        ctl["angles"] = angles
+        except Exception as e:
+            with ctl_lock:
+                ctl["tracking"], ctl["error"] = False, f"gimbal: {e}"
+
+
 def set_tracking(on):
     """Switch tracking on/off; opens the gimbal on first use. Returns an error string or None."""
     with ctl_lock:
@@ -146,7 +195,8 @@ def qnx_summary():
     """What the dashboard shows about the QNX side: is it answering, and what does it decide."""
     f = feed_ref["feed"]
     m = f.qnx_fresh() if f else None
-    out = {"present": m is not None, "used": qnx_status() is not None, "on": view["qnx"], "events": []}
+    out = {"present": m is not None, "used": qnx_status() is not None, "on": view["qnx"], "events": [],
+           "rtt": f.rtt() if (f and hasattr(f, "rtt")) else {}, "udp": bool(f and getattr(f, "udp_answers", 0))}
     if m:
         out.update(state=m["state"], armed=m["armed"], shots=m["shots"], link=m["link"], proc_ms=round(m["proc_us"] / 1000, 1),
                    age_ms=round((time.time() - f.meta_at) * 1000))
@@ -290,7 +340,7 @@ def process(jpg, ts=None):
                 predictor.reset()
             try:
                 with ctl_lock:
-                    if ctl["tracking"]:
+                    if ctl["tracking"] and not qnx_aim_active():     # on QNX the aim loop (qnx_aim_loop) does this, sooner
                         ctl["angles"] = ctl["aimer"].update((ax - w / 2) / (w / 2), (ay - h / 2) / (h / 2))
                         info["settled"] = ctl["aimer"].settled
             except Exception as e:
@@ -539,5 +589,6 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     threading.Thread(target=capture_loop, daemon=True).start()
+    threading.Thread(target=qnx_aim_loop, daemon=True).start()       # aims as soon as the Pi's answer arrives
     print("Turret: http://localhost:8000", flush=True)
     ThreadingHTTPServer(("127.0.0.1", 8000), Handler).serve_forever()

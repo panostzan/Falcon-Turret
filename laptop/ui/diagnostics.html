@@ -67,6 +67,8 @@ function renderState(s) {
     ['Target color', s.armed ? 'Set' : 'Not set', s.armed ? 'ok' : 'na'],
     ['QNX tracker + interlock', (s.qnx && s.qnx.present) ? `answering, ${s.qnx.proc_ms} ms per picture, ${s.qnx.used ? 'in use' : 'not in use'}` : 'not answering',
       (s.qnx && s.qnx.used) ? 'ok' : (s.qnx && s.qnx.present) ? 'warn' : 'na'],
+    ['Control round trip, UDP channel', (s.qnx && s.qnx.rtt && s.qnx.rtt.udp && s.qnx.rtt.udp.n) ? `${s.qnx.rtt.udp.p50} ms typical, ${s.qnx.rtt.udp.p95} ms slowest 5%` : (s.qnx && s.qnx.present ? 'no answers (firewall?)' : '-'), (s.qnx && s.qnx.rtt && s.qnx.rtt.udp && s.qnx.rtt.udp.n) ? 'ok' : 'na'],
+    ['Control round trip, video stream', (s.qnx && s.qnx.rtt && s.qnx.rtt.stream && s.qnx.rtt.stream.n) ? `${s.qnx.rtt.stream.p50} ms typical, ${s.qnx.rtt.stream.p95} ms slowest 5%` : '-', 'na'],
     ['QNX link watchdog', (s.qnx && s.qnx.present) ? (s.qnx.link ? 'heartbeat ok' : 'LINK LOST: QNX disarmed the turret') : '-', (s.qnx && s.qnx.present) ? (s.qnx.link ? 'ok' : 'bad') : 'na'],
     ['Distance sensor', 'Not connected', 'na'],
     ['IR emitter / receiver', 'Not connected', 'na'],

@@ -36,6 +36,7 @@ HEADER = 96
 TURRETD = os.path.expanduser("~/turret_c/turretd")
 CONTROL = ("127.0.0.1", 5005)       # turretd's control port (localhost only)
 META_FLAG = 0x80000000              # set in the length field of a packet that carries text, not a JPEG
+UDP_PORT = 5006                     # the laptop sends control lines here; turretd's answers go straight back, not behind video
 RECORDER = ["camera_example4_record", "-u", UNIT, "-c", "none", "-f", "ucv", "-r", FPS]
 
 
@@ -78,8 +79,46 @@ class Brain:
             return
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.ok = True
+        self.client = None                  # the laptop's address, learned from its first UDP datagram
+        self.udp = None
+        try:
+            self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.udp.bind(("", UDP_PORT))
+            threading.Thread(target=self._udp_control, daemon=True).start()
+        except OSError:
+            self.udp = None                 # no UDP channel: everything still works through the SSH stream
         for target in (self._write_frames, self._read_lines, self._forward_control):
             threading.Thread(target=target, daemon=True).start()
+
+    def _udp_control(self):
+        """Control lines from the laptop over UDP (heartbeat, arm, aim, ping...). `ping x` is answered at once with `P x`, so
+        the laptop can time this path; every other line goes to turretd."""
+        while True:
+            try:
+                data, addr = self.udp.recvfrom(512)
+            except OSError:
+                return
+            self.client = addr
+            for line in data.decode(errors="replace").splitlines():
+                if line.startswith("ping "):
+                    try:
+                        self.udp.sendto(("P " + line[5:]).encode(), addr)
+                    except OSError:
+                        pass
+                elif line:
+                    try:
+                        self.sock.sendto(line.encode() + b"\n", CONTROL)
+                    except OSError:
+                        pass
+
+    def _push_udp(self, text):
+        """turretd's answer straight to the laptop, the moment it exists (not queued behind a video frame)."""
+        if self.udp is not None and self.client is not None:
+            try:
+                self.udp.sendto(text.encode(), self.client)
+            except OSError:
+                pass
 
     def submit(self, raw):
         """Hand over the newest picture; never waits (an older picture that was not taken yet is replaced).
@@ -112,6 +151,7 @@ class Brain:
                     self._gen += 1
                     self._last_t_at = time.time()
                     self._cv.notify_all()
+            self._push_udp(text)            # outside the lock; the same line also rides the video stream as a fallback
 
     def _forward_control(self):
         """Lines from the laptop (over SSH) go to turretd. When the laptop goes away they stop, and turretd's own
@@ -127,6 +167,10 @@ class Brain:
             buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
+                if line.startswith(b"ping "):       # timing probe through the SSH stream: answered inside the stream
+                    with self._cv:
+                        self._out.append("P " + line[5:].decode(errors="replace").strip())
+                    continue
                 try:
                     self.sock.sendto(line + b"\n", CONTROL)
                 except OSError:
@@ -141,7 +185,7 @@ class Brain:
                 self._cv.wait_for(lambda: self._gen > after, timeout=wait)
             lines, self._out = self._out, []
         status = [l for l in lines if l.startswith("T ")][-1:]
-        return [l for l in lines if l.startswith("E ")] + status
+        return [l for l in lines if l.startswith("E ") or l.startswith("P ")] + status
 
     def close(self):
         if self.ok or getattr(self, "proc", None):

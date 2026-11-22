@@ -94,6 +94,7 @@ def test_stream():
 class FakeFeed:
     def __init__(self, meta):
         self.meta, self.meta_at, self.events, self.sent = meta, time.time(), [], []
+        self.udp_answers = 0
 
     def send(self, line):
         self.sent.append(line)
@@ -110,6 +111,105 @@ def meta(**kw):
             "state": "TRACK", "armed": False, "shots": 0, "link": True, "proc_us": 8000.0, "scan_pan": -1.0}
     base.update(kw)
     return base
+
+
+def test_udp_channel():
+    """The UDP channel with a pretend Pi: control lines go out on it, answers and timing probes come back on it, and an older
+    copy of an answer (arriving later through the video stream) never replaces a newer one."""
+    import socket
+    import threading
+    pi = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    pi.bind(("127.0.0.1", 0))
+    pi.settimeout(0.5)
+    got = []
+
+    def serve():
+        while True:
+            try:
+                data, addr = pi.recvfrom(512)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            for line in data.decode().splitlines():
+                got.append(line)
+                if line.startswith("ping "):
+                    pi.sendto(("P " + line[5:]).encode(), addr)
+                elif line == "hb":
+                    pi.sendto(T_LINE.replace("5000", "7000").encode(), addr)     # status stamped t_ms 7000
+    threading.Thread(target=serve, daemon=True).start()
+    real_spawn, real_port = receiver._spawn, receiver.UDP_PORT
+    receiver.UDP_PORT = pi.getsockname()[1]
+    receiver.current_ip[0] = "127.0.0.1"
+    receiver._spawn = lambda quality: FakeProc(b"", open_ended=True)
+    try:
+        feed = receiver.FrameFeed()
+        deadline = time.time() + 5
+        while time.time() < deadline and not (feed.rtt()["udp"]["n"] and feed.meta):
+            time.sleep(0.05)
+        assert "hb" in got, "heartbeats go out over UDP"
+        assert feed.udp_answers > 0 and feed.meta and feed.meta["t_ms"] == 7000.0, feed.meta
+        assert feed.rtt()["udp"]["n"] >= 1 and feed.rtt()["udp"]["p50"] < 100, feed.rtt()
+        assert any(l.startswith("ping u") for l in got) and not any(l.startswith("ping s") for l in got), "UDP probes only go by UDP"
+        assert feed.send("arm 1") and "arm 1" in got or time.sleep(0.3) or "arm 1" in got
+        feed._on_meta(T_LINE)                                                  # the same answer, older (t_ms 5000), via the stream
+        assert feed.meta["t_ms"] == 7000.0, "an older answer must not replace a newer one"
+        feed._pings["s99"] = time.time() - 0.04
+        feed._on_meta("P s99")                                                 # a probe answered through the stream
+        assert feed.rtt()["stream"]["n"] == 1 and 30 < feed.rtt()["stream"]["p50"] < 200
+    finally:
+        receiver._spawn, receiver.UDP_PORT = real_spawn, real_port
+        receiver.current_ip[0] = None
+        pi.close()
+    print("udp channel ok")
+
+
+def test_aim_loop():
+    """Aiming runs on the Pi's answers (not on video frames): the step maps the position (with the flips) and stops the picture
+    loop from aiming a second time."""
+    class FakeAimer:
+        def __init__(self):
+            self.calls, self.settled, self.resets = [], True, 0
+
+        def update(self, ex, ey):
+            self.calls.append((round(ex, 3), round(ey, 3)))
+            return (90, 22)
+
+        def reset(self):
+            self.resets += 1
+
+    app.view.update(mirror=False, vflip=False)
+    a = FakeAimer()
+    assert app.qnx_aim_step(meta(cx=480.0, cy=120.0), a) == (90, 22)
+    assert a.calls[-1] == (0.5, -0.5), a.calls                 # 480 of 640 is half way to the right; 120 of 480 is half way up
+    app.view["mirror"] = True
+    app.qnx_aim_step(meta(cx=480.0, cy=120.0), a)
+    assert a.calls[-1] == (-0.5, -0.5), "mirrored: the same spot is on the other side of the picture"
+    app.view.update(mirror=False, vflip=True)
+    app.qnx_aim_step(meta(cx=320.0, cy=120.0), a)
+    assert a.calls[-1] == (0.0, 0.5)
+    app.view["vflip"] = False
+    n = len(a.calls)
+    assert app.qnx_aim_step(meta(found=False, cx=0.0, cy=0.0), a) is None and a.resets == 1 and len(a.calls) == n
+
+    ff = FakeFeed(meta())
+    app.feed_ref["feed"] = ff
+    app.tracker.use_preset("teal")
+    app.ctl.update(tracking=True, aimer=a, error=None)
+    assert app.qnx_aim_active(), "tracking on + QNX answering: the aim loop owns aiming"
+    app.ctl["tracking"] = False
+    assert not app.qnx_aim_active()
+    app.ctl.update(tracking=False, aimer=None)
+    app.feed_ref["feed"] = None
+    app.tracker.clear()
+
+    # the feed's wait: returns the moment a NEWER answer arrives, and not for an old one
+    feed = receiver.FrameFeed.__new__(receiver.FrameFeed)
+    feed._meta_cv = __import__("threading").Condition()
+    feed.meta = {"t_ms": 100.0}
+    assert receiver.FrameFeed.wait_meta(feed, 100.0, timeout=0.05) is None
+    assert receiver.FrameFeed.wait_meta(feed, 50.0, timeout=0.05)["t_ms"] == 100.0
+    print("aim loop pieces ok")
 
 
 def test_app():
@@ -169,5 +269,7 @@ def test_app():
 if __name__ == "__main__":
     test_parse()
     test_stream()
+    test_udp_channel()
+    test_aim_loop()
     test_app()
     print("qnx stream tests passed")

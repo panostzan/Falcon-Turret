@@ -6,6 +6,7 @@ import subprocess
 import struct
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 USER = "qnxuser"
@@ -54,12 +55,17 @@ def find_pi_ip():
     return FALLBACK_IP
 
 
+current_ip = [None]          # the Pi address the newest SSH connection used (the UDP channel talks to the same one)
+UDP_PORT = 5006
+
+
 def _spawn(quality):
+    current_ip[0] = find_pi_ip()
     return subprocess.Popen(
         ["ssh", "-i", KEY, "-o", "MACs=hmac-sha2-256", "-o", "BatchMode=yes",
          "-o", "ServerAliveInterval=5",
          # the Pi's IP changes, but its identity does not: trust its saved key under a fixed name, refuse any other host
-         "-o", "HostKeyAlias=qnxpi", "-o", "StrictHostKeyChecking=yes", f"{USER}@{find_pi_ip()}", f"python3 ~/bin/pi_stream.py {FPS} {quality}"],
+         "-o", "HostKeyAlias=qnxpi", "-o", "StrictHostKeyChecking=yes", f"{USER}@{current_ip[0]}", f"python3 ~/bin/pi_stream.py {FPS} {quality}"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
 
 
@@ -77,6 +83,11 @@ def _read_exact(stream, n):
 
 META_FLAG = 0x80000000   # set in a packet's length when it carries text from turretd (on QNX) instead of a JPEG
 MAX_PACKET = 8 * 1024 * 1024
+
+
+def parse_pongs(text):
+    """The 'P <id>' lines (answers to timing probes) in a block of text from the Pi."""
+    return [line[2:].strip() for line in text.splitlines() if line.startswith("P ")]
 
 
 def parse_meta(text):
@@ -147,38 +158,110 @@ class FrameFeed:
         self.meta, self.meta_at = None, 0.0          # newest status line from turretd (QNX) and when it arrived
         self.events = []                             # (t_ms, text) from turretd, newest last
         self._proc = None
+        self._pings = {}                             # probe id -> time sent
+        self._meta_cv = threading.Condition()        # signalled when a newer turretd status arrives
+        self.rtt_ms = {"udp": deque(maxlen=120), "stream": deque(maxlen=120)}
+        self._probe_n = 0
+        self._udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._udp.settimeout(1.0)
+        self._udp.bind(("", 0))                      # bound now, so the listener thread can read before the first send
+        self.udp_answers = 0                         # how many answers arrived by UDP (0 = that channel is not working)
         threading.Thread(target=self._run, args=(quality,), daemon=True).start()
         threading.Thread(target=self._heartbeat, daemon=True).start()
+        threading.Thread(target=self._udp_loop, daemon=True).start()
+        threading.Thread(target=self._probe_loop, daemon=True).start()
 
-    def _on_meta(self, text):
+    def _on_meta(self, text, via="stream"):
         status, events = parse_meta(text)
-        if status:
+        # an answer counts only if it is newer than the one we have: the same line arrives twice (UDP first, then the stream)
+        if status and (self.meta is None or status["t_ms"] >= self.meta["t_ms"]):
             self.meta, self.meta_at = status, time.time()
+            with self._meta_cv:
+                self._meta_cv.notify_all()
         if events:
-            self.events = (self.events + events)[-40:]
+            known = {e for e in self.events}
+            self.events = (self.events + [e for e in events if e not in known])[-40:]
+        now = time.time()
+        for pid in parse_pongs(text):
+            sent = self._pings.pop(pid, None)
+            if sent is not None:
+                self.rtt_ms[via if via in self.rtt_ms else "stream"].append((now - sent) * 1000)
+
+    def _udp_loop(self):
+        """Answers that come straight back over UDP (tracker status the moment it exists, timing probes)."""
+        while True:
+            try:
+                data, addr = self._udp.recvfrom(2048)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            self.udp_answers += 1
+            self._on_meta(data.decode(errors="replace"), via="udp")
+
+    def _probe_loop(self):
+        """Timing probes, twice a second: one through the UDP channel and one through the SSH video stream, so the dashboard
+        can show how long each takes to come back."""
+        while True:
+            time.sleep(0.5)
+            if self._proc is None:
+                continue
+            self._probe_n += 1
+            for tag, path in (("u", "udp"), ("s", "ssh")):
+                pid = f"{tag}{self._probe_n}"
+                self._pings[pid] = time.time()
+                self.send(f"ping {pid}", path)
+            for old in [p for p, t in self._pings.items() if time.time() - t > 5]:
+                del self._pings[old]                 # lost probes are forgotten, not counted
+
+    def rtt(self):
+        """Round-trip times of the timing probes in ms: {path: {p50, p95, n}} for the UDP channel and the SSH stream."""
+        out = {}
+        for path, values in self.rtt_ms.items():
+            v = sorted(values)
+            out[path] = {"n": len(v), "p50": round(v[len(v) // 2], 1) if v else None,
+                         "p95": round(v[min(len(v) - 1, int(len(v) * 0.95))], 1) if v else None}
+        return out
 
     def _on_proc(self, proc):
         self._proc = proc
         if proc is None:
             self.meta = None                          # the Pi side is gone: do not trust the last answer
 
-    def send(self, line):
-        """Send one control line to turretd on the Pi. Returns False if there is no connection."""
-        proc = self._proc
+    def send(self, line, path="both"):
+        """Send one control line to the Pi, over the UDP channel, the SSH stream or both (default: both, since every line is
+        harmless to receive twice and a datagram can be lost). Returns False if there is no connection at all."""
+        proc, sent = self._proc, False
         if proc is None:
             return False
-        try:
-            proc.stdin.write(line.encode() + b"\n")
-            proc.stdin.flush()
-            return True
-        except (OSError, ValueError):
-            return False
+        if path in ("both", "udp") and current_ip[0]:
+            try:
+                self._udp.sendto(line.encode() + b"\n", (current_ip[0], UDP_PORT))
+                sent = True
+            except OSError:
+                pass
+        if path in ("both", "ssh"):
+            try:
+                proc.stdin.write(line.encode() + b"\n")
+                proc.stdin.flush()
+                sent = True
+            except (OSError, ValueError):
+                pass
+        return sent
 
     def _heartbeat(self):
         """turretd disarms the turret by itself if these stop (the laptop or the link died)."""
         while True:
             self.send("hb")
             time.sleep(0.2)
+
+    def wait_meta(self, after_t_ms, timeout=0.5):
+        """Block until a turretd status newer than `after_t_ms` (the Pi's own clock) exists; return it, or None on timeout. The
+        aiming loop runs on this, so it reacts the moment the Pi's answer arrives and does not wait for a video frame."""
+        with self._meta_cv:
+            self._meta_cv.wait_for(lambda: self.meta is not None and self.meta["t_ms"] > after_t_ms, timeout)
+        m = self.meta
+        return m if (m is not None and m["t_ms"] > after_t_ms) else None
 
     def qnx_fresh(self, max_age=0.3):
         """The newest turretd status if it is recent (about 4 pictures), else None: then the laptop tracker takes over."""
@@ -248,8 +331,15 @@ class CameraFeed:
             self._consumed = self._seq
             return (self._seq, *self._latest)
 
-    def send(self, line):
+    def send(self, line, path="both"):
         return False
+
+    def rtt(self):
+        return {}
+
+    def wait_meta(self, after_t_ms, timeout=0.5):
+        time.sleep(timeout)
+        return None
 
     def qnx_fresh(self, max_age=0.6):
         return None
