@@ -76,7 +76,7 @@ int tracker_use_preset(Tracker *t, const char *name)
 {
     static const struct { const char *name; int lo[3], hi[3]; } P[] = {
         {"teal", {75, 70, 40},   {105, 255, 255}},
-        {"blue", {108, 150, 60}, {132, 255, 255}},
+        {"blue", {108, 110, 100}, {132, 255, 255}},     /* same limits as laptop/tracker.py: see the note there */
     };
     for (size_t i = 0; i < sizeof P / sizeof P[0]; i++) {
         if (strcmp(P[i].name, name) == 0) {
