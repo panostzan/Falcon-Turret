@@ -1,8 +1,8 @@
-"""Sliders to move the pan, tilt and lift (platform) servos by hand and see the angles being commanded.
+"""Sliders to move the pan, tilt, lift (platform) and aux (fourth) servos by hand and see the angles being commanded.
 
     python tools/servo_sliders.py        (the dashboard server must not be tracking: it would be holding the port)
 
-  Pan, Tilt and Lift sliders   drag to move; the number is the angle being COMMANDED (pan and tilt 0-180, lift 0-150).
+  Pan, Tilt, Lift and Aux sliders   drag to move; the number is the angle being COMMANDED (pan, tilt and aux 0-180, lift 0-150).
                                Pan and tilt use the same angles as the ESP32 setup did, so their numbers mean the same.
   Arrow keys                   with a slider selected, nudge it by 1 degree (PageUp/PageDown: 10)
   Centre                       pan 90, tilt 22, lift 90, and energises all three (they jump there: keep the arms off for the first test)
@@ -29,17 +29,18 @@ LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "captures",
 LIFT_CAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "laptop", "lift_calibration.json")
 LIFT_HOME = 90                                    # the lift goes 0 to 150 (a software limit, see gimbal.LIFT_RANGE)
 UPDATE_MS = 30
-AXES = ("pan", "tilt", "lift")
-RANGES = {"pan": PAN_RANGE, "tilt": TILT_RANGE, "lift": LIFT_RANGE}
+AXES = ("pan", "tilt", "lift", "aux")
+AUX_HOME = 90                                     # the fourth servo (PCA9685 channel 3); the Centre button does NOT move it
+RANGES = {"pan": PAN_RANGE, "tilt": TILT_RANGE, "lift": LIFT_RANGE, "aux": (0, 180)}
 
 
 class SliderControl:
     """The logic without a window: the sliders set TARGETS; every update moves each servo toward its target by at most
     `max_step` degrees and sends only what changed. Testable with a fake gimbal."""
 
-    def __init__(self, gimbal, pan=CENTER[0], tilt=CENTER[1], lift=LIFT_HOME, max_step=6, log=None):
+    def __init__(self, gimbal, pan=CENTER[0], tilt=CENTER[1], lift=LIFT_HOME, max_step=6, log=None, aux=AUX_HOME):
         self.g, self.max_step, self.log = gimbal, max_step, log
-        self.target = {"pan": pan, "tilt": tilt, "lift": lift}
+        self.target = {"pan": pan, "tilt": tilt, "lift": lift, "aux": aux}
         self.sent = dict(self.target)
         self.marks = {}
 
@@ -117,7 +118,7 @@ def run_window(port):
     root = tk.Tk()
     root.title("Servo sliders")
     root.configure(bg="#14170f")
-    root.geometry("660x600")
+    root.geometry("660x680")
     fg, dim, accent = "#dfe6cf", "#8b9777", "#b6e23a"
     status = tk.Label(root, text="opening the port...", fg=fg, bg="#14170f", wraplength=620)
     status.pack(pady=(10, 4))
@@ -139,6 +140,7 @@ def run_window(port):
     make_slider("pan", "PAN")
     make_slider("tilt", "TILT")
     make_slider("lift", "LIFT")
+    make_slider("aux", "AUX")
 
     speed_row = tk.Frame(root, bg="#14170f")
     speed_row.pack(pady=4)
@@ -190,7 +192,7 @@ def run_window(port):
 
     row1 = tk.Frame(root, bg="#14170f")
     row1.pack(pady=6)
-    tk.Button(row1, text="Centre (energise all)", command=centre).grid(row=0, column=0, padx=6)
+    tk.Button(row1, text="Centre pan/tilt/lift", command=centre).grid(row=0, column=0, padx=6)
     tk.Button(row1, text="Release all (limp)", command=release).grid(row=0, column=1, padx=6)
     row2 = tk.Frame(root, bg="#14170f")
     row2.pack(pady=2)
@@ -226,11 +228,11 @@ def run_window(port):
         status.config(text=f"could not open {port}: {e}", fg="#ff4b2b")
         root.mainloop()
         return
-    state["ctl"] = SliderControl(gimbal, pan=pan, tilt=tilt, lift=gimbal.lift, log=log)
+    state["ctl"] = SliderControl(gimbal, pan=pan, tilt=tilt, lift=gimbal.lift, aux=gimbal.aux, log=log)
     sync_sliders()
     status.config(text=f"connected on {port}. The servos are limp until you drag a slider (or press Centre). "
-                       f"Firmware reports pan {pan}, tilt {tilt}, lift {gimbal.lift}.")
-    log(f"{time.strftime('%H:%M:%S')} opened {port}, start pan {pan} tilt {tilt} lift {gimbal.lift}")
+                       f"Firmware reports pan {pan}, tilt {tilt}, lift {gimbal.lift}, aux {gimbal.aux}.")
+    log(f"{time.strftime('%H:%M:%S')} opened {port}, start pan {pan} tilt {tilt} lift {gimbal.lift} aux {gimbal.aux}")
     tick()
     root.mainloop()
     log(f"{time.strftime('%H:%M:%S')} closed; marks {state['ctl'].marks}")

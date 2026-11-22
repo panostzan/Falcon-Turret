@@ -43,7 +43,7 @@ def default_tilt_limits():
     import tilt_calibration
     window, _ = tilt_calibration.load()
     return window or (0, 45)
-_REPLY = re.compile(r"P(\d+)\s+T(\d+)(?:\s+L(\d+))?")      # the Feather firmware adds the lift (platform) servo: L<angle>
+_REPLY = re.compile(r"P(\d+)\s+T(\d+)(?:\s+L(\d+))?(?:\s+A(\d+))?")      # the Feather firmware adds the lift (platform) servo: L<angle>
 
 
 UDP_PORT = 4210
@@ -103,6 +103,7 @@ class Gimbal:
         self.link = link
         self.pan, self.tilt = CENTER
         self.lift = 90                    # the lift / platform servo (third servo; only the Feather firmware has it)
+        self.aux = 90                     # the fourth servo (PCA9685 channel 3), moves only when commanded
         self._sent = set()                # axes commanded since this connection opened: the FIRST command to each is always sent,
                                           # because the Feather's servos are limp until commanded, even for an angle we 'already have'
 
@@ -117,6 +118,8 @@ class Gimbal:
         self.pan, self.tilt = int(m[1]), int(m[2])
         if m[3] is not None:
             self.lift = int(m[3])
+        if m[4] is not None:
+            self.aux = int(m[4])
         return self.pan, self.tilt
 
     def status(self):
@@ -146,7 +149,7 @@ class Gimbal:
         name = self._query("I", r"I (\S+)")[1]
         return None if name == "none" else name
 
-    def move_to(self, pan=None, tilt=None, lift=None):
+    def move_to(self, pan=None, tilt=None, lift=None, aux=None):
         """Absolute move. Sends only the axes that actually change (and always the first command to an axis, which is what
         energises a limp servo); angles are clamped to safe ranges. `lift` is the platform servo (software limit 0-150)."""
         if pan is not None and ((p := _clamp(pan, *PAN_RANGE)) != self.pan or "P" not in self._sent):
@@ -158,6 +161,9 @@ class Gimbal:
         if lift is not None and ((l := _clamp(lift, *self.lift_limits)) != self.lift or "L" not in self._sent):
             self._send(f"L{l}")
             self._sent.add("L")
+        if aux is not None and ((a := _clamp(aux, 0, 180)) != self.aux or "A" not in self._sent):
+            self._send(f"A{a}")
+            self._sent.add("A")
         return self.pan, self.tilt
 
     def release(self):

@@ -43,7 +43,7 @@ def test():
     c.set_target("tilt", 500)                                # clamped to what the servo takes
     c.set_target("pan", -40)
     c.set_target("lift", 300)
-    assert c.target == {"pan": 0, "tilt": 180, "lift": 150}, "the lift stops at 150"
+    assert c.target == {"pan": 0, "tilt": 180, "lift": 150, "aux": 90}, "the lift stops at 150"
     g.sent.clear()
     c.update()
     assert g.sent == [{"pan": 144}, {"tilt": 28}, {"lift": 96}], g.sent      # all three move together, each limited to the step
@@ -56,7 +56,7 @@ def test():
     c.nudge("pan", 10)                                       # keys nudge the target
     assert c.target["pan"] == 10
     c.centre()
-    assert g.calls[-1] == "center" and c.target == {"pan": 90, "tilt": 22, "lift": 90} and c.sent == c.target
+    assert g.calls[-1] == "center" and c.target == {"pan": 90, "tilt": 22, "lift": 90, "aux": 90} and c.sent == c.target
     c.release()
     c.set_oscillator(26000)
     assert g.calls[-2:] == ["release", ("osc", 26000)]

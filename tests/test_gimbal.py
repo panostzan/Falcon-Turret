@@ -46,29 +46,29 @@ class FakeFeather:
     F trims the oscillator, replies carry all three angles. No angle limits in the firmware itself."""
 
     def __init__(self):
-        self.angle, self.energised, self.osc, self.out, self.log = [90, 22, 90], [False] * 3, 25000, b"", []
+        self.angle, self.energised, self.osc, self.out, self.log = [90, 22, 90, 90], [False] * 4, 25000, b"", []
 
     def write(self, data):
         cmd = data.decode().strip()
         self.log.append(cmd)
         if cmd == "C":
-            self.angle = [90, 22, 90]
-            self.energised = [True] * 3
+            self.angle[:3] = [90, 22, 90]                  # the aux servo is not touched by C
+            self.energised[:3] = [True] * 3
         elif cmd == "S":
             pass
         elif cmd == "O":
-            self.energised = [False] * 3
+            self.energised = [False] * 4
         elif cmd == "R":
             self.out += b"R-1\n"
             return
         elif cmd == "I":
             self.out += b"I none\n"
             return
-        elif cmd[:1] in "PTL" and len(cmd) > 1:
+        elif cmd[:1] in "PTLA" and len(cmd) > 1:
             if len(cmd) > 4 or not cmd[1:].isdigit():
                 self.out += b"ERR invalid angle\n"
                 return
-            axis = "PTL".index(cmd[0])
+            axis = "PTLA".index(cmd[0])
             self.angle[axis] = max(0, min(180, int(cmd[1:])))
             self.energised[axis] = True
         elif cmd[:1] == "F" and len(cmd) > 1:
@@ -79,7 +79,7 @@ class FakeFeather:
         else:
             self.out += b"ERR unknown command\n"
             return
-        self.out += f"P{self.angle[0]} T{self.angle[1]} L{self.angle[2]}\n".encode()
+        self.out += f"P{self.angle[0]} T{self.angle[1]} L{self.angle[2]} A{self.angle[3]}".encode() + bytes([10])
 
     def readline(self):
         line, _, self.out = self.out.partition(b"\n")
@@ -93,13 +93,13 @@ def test_feather():
     """The laptop side against the Feather firmware's rules: limp start, first command always sent, lift servo, release."""
     f = FakeFeather()
     g = Gimbal(link=f, tilt_limits=(0, 180))
-    assert g.status() == (90, 22) and g.lift == 90 and f.energised == [False] * 3, "starts limp"
+    assert g.status() == (90, 22) and g.lift == 90 and f.energised == [False] * 4, "starts limp"
     g.move_to(pan=90)                                      # the same as the assumed start angle, but it must still be sent
-    assert f.energised == [True, False, False] and f.log[-1] == "P90", f.log
+    assert f.energised == [True, False, False, False] and f.log[-1] == "P90", f.log
     g.move_to(pan=90)
     assert f.log.count("P90") == 1, "after that, an unchanged angle is not sent again"
     g.move_to(tilt=22, lift=90)                            # first commands to tilt and lift: sent even though they equal the start values
-    assert f.energised == [True, True, True] and g.lift == 90
+    assert f.energised == [True, True, True, False] and g.lift == 90
     g.move_to(lift=140)
     assert g.lift == 140 and f.angle[2] == 140 and f.log[-1] == "L140"
     g.move_to(lift=999)
@@ -108,12 +108,22 @@ def test_feather():
     wide.move_to(lift=999)
     assert wide.lift == 180, "the limit can be widened when asked"
     g.release()
-    assert f.energised == [False] * 3 and f.log[-1] == "O"
+    assert f.energised == [False] * 4 and f.log[-1] == "O"
     g.move_to(pan=90)
     assert f.energised[0] and f.log[-1] == "P90", "after a release the next command energises again"
     g.set_oscillator(26500)
     assert f.osc == 26500
-    assert g.center() == (90, 22) and f.energised == [True] * 3
+    assert g.center() == (90, 22) and f.energised == [True, True, True, False]
+    # the fourth servo (channel 3, "A"): limp until commanded, moved only by its own command, never by C, and reported back
+    assert f.energised[3] is False and g.aux == 90
+    g.move_to(aux=45)
+    assert f.log[-1] == "A45" and f.energised[3] is True and g.aux == 45, f.log
+    g.move_to(aux=45)
+    assert f.log[-1] == "A45" and f.log.count("A45") == 1, "an unchanged aux is not resent"
+    g.move_to(aux=400)
+    assert f.log[-1] == "A180" and g.aux == 180, "aux is clamped to 0-180"
+    g.center()
+    assert g.aux == 180, "Centre does not move the aux servo"
     g.move_to(pan=120, lift=30)
     assert (f.angle[0], f.angle[2]) == (120, 30) and g.pan == 120 and g.lift == 30
     for bad in ("L9999", "Lx", "F5", "Z"):                 # errors come back as ERR and raise on the laptop side
