@@ -1,6 +1,7 @@
 """Tests Gimbal against a simulated ESP32 that follows the firmware's protocol (no hardware needed).
 Run: python tests/test_gimbal.py"""
 import os
+os.environ["TURRET_TILT_CALIBRATION"] = "none.json"   # never read the operator's real calibration in a test
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "laptop"))
@@ -25,7 +26,7 @@ class FakeESP:
             if cmd[0] == "P":
                 self.pan = max(0, min(180, v))
             else:
-                self.tilt = max(0, min(60, v))
+                self.tilt = max(0, min(180, v))
         else:
             self.out += b"ERR unknown command\n" if cmd[:1] not in "PT" else b"ERR invalid angle\n"
             return
@@ -102,12 +103,24 @@ def test_async():
     print("async gimbal tests passed")
 
 
+def test_no_limit():
+    """The firmware has no tilt limit: the software limit is whatever the operator calibrated, or none at all."""
+    esp = FakeESP()
+    g = Gimbal(link=esp, tilt_limits=(0, 180))
+    assert g.move_to(tilt=170) == (90, 170) and g.move_to(tilt=500) == (90, 180) and g.move_to(tilt=-5) == (90, 0)
+    g2 = Gimbal(link=FakeESP(), tilt_limits=(10, 40))
+    assert g2.move_to(tilt=100) == (90, 40) and g2.move_to(tilt=0) == (90, 10)
+    print("no-limit and custom-limit tests passed")
+
+
 def test():
+    test_no_limit()
     esp = FakeESP()
     g = Gimbal(link=esp)
+    assert g.tilt_limits == (0, 45), g.tilt_limits
     assert g.status() == (90, 22)
     assert g.move_to(pan=120) == (120, 22)
-    assert g.move_to(tilt=200) == (120, 60), "tilt clamps to 60"
+    assert g.move_to(tilt=200) == (120, 45), "tilt clamps to the software limit (0-45 by default)"
     assert g.move_to(tilt=-10) == (120, 0), "tilt clamps to 0"
     assert g.move_to(pan=-50) == (0, 0), "pan clamps to 0"
     assert g.nudge(d_pan=10, d_tilt=5) == (10, 5)

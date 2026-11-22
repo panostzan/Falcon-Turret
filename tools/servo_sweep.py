@@ -2,14 +2,14 @@
 
     python tools/servo_sweep.py                    pan 0-180 and tilt 0-45, 3 round trips each (pan first)
     python tools/servo_sweep.py --axis tilt        only one axis (pan, tilt or both)
-    python tools/servo_sweep.py --tilt 5,40        a different tilt range (the firmware only accepts 0-60)
+    python tools/servo_sweep.py --tilt 5,40        a different tilt range (0-180 is the most the servo takes)
     python tools/servo_sweep.py --cycles 1 --step 1 --delay 0.08     gentler: 1 degree steps, slower
 
 Notes
   * Opening the serial port resets the ESP32, so the servos jump to their start position (pan 90, tilt 22) first.
   * The dashboard server must not be tracking at the same time (it would be holding the port).
-  * The firmware only accepts tilt 0-60 (new firmware). The default tilt range is the 0-45 the bracket allows; a servo
-    pushed against a mechanical stop heats up fast, so widen it only if the bracket really allows it.
+  * The default tilt range is 0-45. A servo pushed against a mechanical stop heats up fast, so widen it only if the
+    bracket really allows it.
   * Ctrl+C stops the sweep where it is.
 """
 import argparse
@@ -70,7 +70,7 @@ def main(argv=None, gimbal=None):
     p.add_argument("--cycles", type=int, default=3)
     p.add_argument("--step", type=int, default=2, help="degrees per move (default 2)")
     p.add_argument("--delay", type=float, default=0.05, help="seconds between moves (default 0.05)")
-    p.add_argument("--tilt", default="0,45", help="tilt range LO,HI in degrees (default 0,45; firmware limit 0-60)")
+    p.add_argument("--tilt", default="0,45", help="tilt range LO,HI in degrees (default 0,45; the servo takes 0-180)")
     a = p.parse_args(argv)
     if not (1 <= a.cycles <= 20 and 1 <= a.step <= 10 and 0.01 <= a.delay <= 1.0):
         sys.exit("cycles 1-20, step 1-10 degrees, delay 0.01-1 s")
@@ -82,7 +82,7 @@ def main(argv=None, gimbal=None):
     if gimbal is None:
         from gimbal import Gimbal
         print(f"opening {a.port} (this resets the ESP32; the servos jump to {CENTER[0]}/{CENTER[1]} first) ...")
-        gimbal = Gimbal(a.port)
+        gimbal = Gimbal(a.port, tilt_limits=TILT_RANGE)     # the --tilt range is checked by this tool, so no other limit
         print("start position:", gimbal.status())
     try:
         if a.axis in ("pan", "both"):

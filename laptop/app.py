@@ -23,9 +23,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from aim import Aimer              # noqa: E402
 from engage import Engagement     # noqa: E402
-from gimbal import AsyncGimbal     # noqa: E402
+from gimbal import TILT_RANGE, AsyncGimbal     # noqa: E402
 from predict import LeadPredictor  # noqa: E402
 from receiver import CameraFeed, FrameFeed   # noqa: E402
+import tilt_calibration                        # noqa: E402
 from telemetry import Telemetry    # noqa: E402
 from depth_nn import DepthSmoother, NeuralDepth, thumbnail, overlay as depth_overlay   # noqa: E402  (loads onnxruntime only when the layer is first switched on)
 from tracker import PRESETS, ColorTracker, LastSeen   # noqa: E402
@@ -50,9 +51,10 @@ tracker = ColorTracker()
 # on the real turret, the other way pointed the wrong direction. The dashboard's Flip buttons change these live.
 # The tilt servo's usable travel (degrees). The picture height maps onto it: bottom of the picture = the high end (45), top = the low
 # end (0), middle = 22.5. Override with TILT_WINDOW="0,45"; "full" uses the whole 90-180 range and the older sign.
-_tw = os.environ.get("TILT_WINDOW", "0,45")
+_cal_window, _cal_sign = tilt_calibration.load()          # made with tools/tilt_watch.py (Mark TOP / Mark BOTTOM)
+_tw = os.environ.get("TILT_WINDOW") or ("%d,%d" % _cal_window if _cal_window else "0,45")
 TILT_WINDOW = None if _tw == "full" else tuple(int(v) for v in _tw.split(","))
-DEFAULT_SIGNS = {"pan": 1, "tilt": 1 if TILT_WINDOW else -1}
+DEFAULT_SIGNS = {"pan": 1, "tilt": (_cal_sign if (_cal_window and not os.environ.get("TILT_WINDOW")) else 1) if TILT_WINDOW else -1}
 view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False, "smooth": True, "depthcheck": False, "cutout": False, "fadestale": False, "qnx": True}   # flip the picture so it matches the real world (set from the dashboard)
 cfg = {"lead_ms": 0, "min_conf": 80, "cut": 15}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
                                      # to about the measured camera-to-servo delay, using the dashboard slider)
@@ -94,7 +96,7 @@ def set_tracking(on):
             return None
         try:
             if ctl["aimer"] is None:
-                ctl["aimer"] = Aimer(AsyncGimbal(GIMBAL_PORT), tilt_window=TILT_WINDOW)
+                ctl["aimer"] = Aimer(AsyncGimbal(GIMBAL_PORT, tilt_limits=TILT_WINDOW or TILT_RANGE), tilt_window=TILT_WINDOW)
                 if TILT_WINDOW:
                     engage.scan_tilt = ctl["aimer"].tilt_center
                 ctl["aimer"].sign.update(DEFAULT_SIGNS)

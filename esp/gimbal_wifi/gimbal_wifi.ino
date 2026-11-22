@@ -1,7 +1,7 @@
 // Wi-Fi version of gimbal.ino: same pins, same commands, same replies; commands arrive as UDP packets
 // (port 4210) as well as over USB serial. Replies go back to whoever sent the command.
 //
-// Commands (one per packet / line):  P<0-180> pan   T<0-60> tilt   C center   S status
+// Commands (one per packet / line):  P<0-180> pan   T<0-180> tilt   C center   S status
 //                                    R distance in mm ("R-1" = no sensor / no reading)   I sensor model
 // Reply: "P<pan> T<tilt>" (or "R<mm>", "I <model>") or "ERR ...".
 #include <Arduino.h>
@@ -13,9 +13,10 @@
 
 const uint16_t UDP_PORT = 4210;
 const int PAN_PIN = 19, TILT_PIN = 18;
-// The tilt servo's travel with our bracket is about 0-45 degrees (the old firmware used 90-180, which pushes this arm into
-// the bracket). The firmware itself refuses to go outside TILT_MIN..TILT_MAX, so a software mistake cannot jam the arm.
-const int TILT_MIN = 0, TILT_MAX = 60, TILT_HOME = 22;
+// No travel limits here on purpose: the usable tilt range depends on the bracket, so it is set in the laptop software
+// (laptop/tilt_calibration.json, made with tools/tilt_watch.py) and changing it never needs a flash. Pan and tilt both take 0-180.
+// TILT_HOME is only where the tilt servo goes when the ESP powers up.
+const int TILT_MIN = 0, TILT_MAX = 180, TILT_HOME = 22;
 
 Servo panServo, tiltServo;
 int panAngle = 90, tiltAngle = TILT_HOME;

@@ -1,5 +1,6 @@
 """Tests the servo sweep with a fake gimbal (no hardware). Run: python tests/test_servo_sweep.py"""
 import os
+os.environ["TURRET_TILT_CALIBRATION"] = "none.json"   # never read the operator's real calibration in a test
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -56,7 +57,7 @@ def test():
     assert min(a for _, a in g.log) == 0 and max(a for _, a in g.log) == 60 and g.closed
     assert "done" in out.getvalue()
 
-    for bad in (["--cycles", "0"], ["--step", "50"], ["--delay", "0"], ["--tilt", "90,180"], ["--tilt", "30,10"], ["--tilt", "x"]):
+    for bad in (["--cycles", "0"], ["--step", "50"], ["--delay", "0"], ["--tilt", "90,200"], ["--tilt", "30,10"], ["--tilt", "x"]):
         try:
             sw.main(bad, gimbal=FakeGimbal())
             raise AssertionError("bad option accepted: " + str(bad))

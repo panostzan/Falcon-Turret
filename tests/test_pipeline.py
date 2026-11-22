@@ -1,6 +1,7 @@
 """End-to-end test with no hardware: synthetic camera frames -> flip -> color tracker -> aiming -> async
 gimbal -> simulated ESP. Run: python tests/test_pipeline.py"""
 import os
+os.environ["TURRET_TILT_CALIBRATION"] = "none.json"   # never read the operator's real calibration in a test
 import sys
 import time
 

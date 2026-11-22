@@ -1,5 +1,6 @@
 """Tests the tilt watch tool's logic with a fake gimbal (no window, no hardware). Run: python tests/test_tilt_watch.py"""
 import os
+os.environ["TURRET_TILT_CALIBRATION"] = "none.json"   # never read the operator's real calibration in a test
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -22,12 +23,12 @@ def test():
     g = FakeGimbal()
     c = tw.TiltControl(g, start=22, log=lines.append)
     assert c.jog(1) == 23 and c.jog(-5) == 18 and g.sent == [23, 18]
-    assert c.jog(-500) == 0 and c.jog(500) == 60, "never outside what the firmware accepts"
+    assert c.jog(-500) == 0 and c.jog(500) == 180, "never outside what the firmware accepts"
     c.set(30)
     c.set_limits(40, 20)                                   # given the wrong way round: still sane
     assert (c.lo, c.hi) == (20, 40)
     c.set_limits(-50, 999)
-    assert (c.lo, c.hi) == (0, 60)
+    assert (c.lo, c.hi) == (0, 180)
 
     c.set_limits(10, 20)
     c.set(15)
@@ -38,12 +39,12 @@ def test():
     c.jog(2)
     assert not c.sweeping, "a key press stops the sweep"
 
-    # limits with no room to sweep (both clamp to 60): it must not jump, and must not keep "sweeping" in place
+    # limits with no room to sweep (both clamp to 180): it must not jump, and must not keep "sweeping" in place
     g2 = FakeGimbal()
     c2 = tw.TiltControl(g2, start=50)
     c2.set(50)
-    c2.set_limits(70, 80)
-    assert (c2.lo, c2.hi) == (60, 60)
+    c2.set_limits(300, 400)
+    assert (c2.lo, c2.hi) == (180, 180)
     c2.sweeping = True
     sent_before = list(g2.sent)
     c2.sweep_step()

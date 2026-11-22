@@ -4,10 +4,11 @@
 
   Up / Down arrows      move 1 degree           PageUp / PageDown   move 5 degrees        Home   go to 22
   Sweep button          goes back and forth between the Low and High boxes, 1 degree at a time
-  "Mark low" / "Mark high"   write down the current angle as the end you found (shown at the bottom and in the log)
+  "Mark TOP" / "Mark BOTTOM"   move the camera to its highest safe position and press TOP; to its lowest safe position and
+                        press BOTTOM. The tool saves the tilt range and the direction for the dashboard automatically.
   Esc                   quit (the servo stays where it is)
 
-The firmware only accepts tilt 0-60. Watch the servo, and note the commanded angle where it starts to move, where it jams
+There is no software or firmware limit here (the servo takes 0-180): be gentle near the ends. Watch the servo, and note the commanded angle where it starts to move, where it jams
 or hums, and which end of the picture each end is. Every command is also written to captures/tilt_watch.log.
 """
 import os
@@ -16,6 +17,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "laptop"))
 from gimbal import TILT_RANGE   # noqa: E402
+import tilt_calibration          # noqa: E402
 
 LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "captures", "tilt_watch.log")
 
@@ -70,6 +72,13 @@ class TiltControl:
         if self.log:
             self.log(f"{time.strftime('%H:%M:%S')} MARK {which} = {self.angle}")
 
+    def calibration(self):
+        """From the TOP and BOTTOM marks: the tilt window and direction for the dashboard (None until both are marked, or when
+        they are too close together)."""
+        if "top" in self.marks and "bottom" in self.marks:
+            return tilt_calibration.from_marks(self.marks["top"], self.marks["bottom"])
+        return None
+
 
 def run_window(port):
     import tkinter as tk
@@ -88,7 +97,7 @@ def run_window(port):
     root.geometry("560x420")
     big = tk.Label(root, text="…", font=("Consolas", 64, "bold"), fg="#b6e23a", bg="#14170f")
     big.pack(pady=(14, 0))
-    tk.Label(root, text="commanded tilt, degrees (the firmware accepts 0 to 60)", fg="#8b9777", bg="#14170f").pack()
+    tk.Label(root, text="commanded tilt, degrees (no limit: the servo takes 0 to 180)", fg="#8b9777", bg="#14170f").pack()
     canvas = tk.Canvas(root, width=500, height=46, bg="#0a0d07", highlightthickness=0)
     canvas.pack(pady=10)
     status = tk.Label(root, text="opening the port (this resets the ESP)...", fg="#dfe6cf", bg="#14170f")
@@ -111,7 +120,7 @@ def run_window(port):
         canvas.delete("all")
         x = lambda a: 10 + (a - TILT_RANGE[0]) / (TILT_RANGE[1] - TILT_RANGE[0]) * 480
         canvas.create_rectangle(x(ctl.lo), 12, x(ctl.hi), 34, fill="#1f2418", outline="#333b27")
-        for a in range(TILT_RANGE[0], TILT_RANGE[1] + 1, 10):
+        for a in range(TILT_RANGE[0], TILT_RANGE[1] + 1, 20):
             canvas.create_line(x(a), 34, x(a), 42, fill="#8b9777")
             canvas.create_text(x(a), 6, text=str(a), fill="#8b9777", font=("Consolas", 8))
         canvas.create_line(x(ctl.angle), 8, x(ctl.angle), 40, fill="#b6e23a", width=3)
@@ -141,15 +150,24 @@ def run_window(port):
         sweep_btn.config(text="Stop sweep" if ctl.sweeping else "Sweep back and forth")
 
     def mark(which):
-        state["ctl"].mark(which)
+        ctl = state["ctl"]
+        ctl.mark(which)
+        cal = ctl.calibration()
+        if cal:
+            tilt_calibration.save(cal)
+            log(f"{time.strftime('%H:%M:%S')} SAVED calibration {cal}")
+            status.config(text=f"saved: the dashboard will use tilt {cal['window'][0]} to {cal['window'][1]}; the bottom of the picture "
+                               f"= servo angle {cal['window'][1] if cal['sign'] > 0 else cal['window'][0]}", fg="#b6e23a")
+        elif "top" in ctl.marks and "bottom" in ctl.marks:
+            status.config(text="TOP and BOTTOM are too close together to be a range: move further and mark again", fg="#ff4b2b")
         draw()
 
     sweep_btn = tk.Button(root, text="Sweep back and forth", command=toggle_sweep)
     sweep_btn.pack(pady=4)
     both = tk.Frame(root, bg="#14170f")
     both.pack()
-    tk.Button(both, text="Mark low", command=lambda: mark("low")).grid(row=0, column=0, padx=6)
-    tk.Button(both, text="Mark high", command=lambda: mark("high")).grid(row=0, column=1, padx=6)
+    tk.Button(both, text="Mark TOP  (camera highest safe)", command=lambda: mark("top")).grid(row=0, column=0, padx=6)
+    tk.Button(both, text="Mark BOTTOM  (camera lowest safe)", command=lambda: mark("bottom")).grid(row=0, column=1, padx=6)
     marks.pack(pady=6)
     tk.Label(root, text="Up/Down = 1 degree   PageUp/PageDown = 5   Home = 22   Esc = quit", fg="#8b9777", bg="#14170f").pack()
     for key, d in (("<Up>", 1), ("<Down>", -1), ("<Prior>", 5), ("<Next>", -5)):
@@ -158,7 +176,7 @@ def run_window(port):
     root.bind("<Escape>", lambda e: root.destroy())
 
     try:
-        gimbal = Gimbal(port)
+        gimbal = Gimbal(port, tilt_limits=TILT_RANGE)     # NO limit here: this tool is for finding the real ends
         start = gimbal.status()[1]
     except Exception as e:
         status.config(text=f"could not open {port}: {e}", fg="#ff4b2b")

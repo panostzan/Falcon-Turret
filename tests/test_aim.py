@@ -1,6 +1,7 @@
 """Tests the aiming logic with a simulated gimbal + target. Run: python tests/test_aim.py"""
 import math
 import os
+os.environ["TURRET_TILT_CALIBRATION"] = "none.json"   # never read the operator's real calibration in a test
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "laptop"))
@@ -118,7 +119,7 @@ def test_no_hunting():
     import random
     rnd = random.Random(2)
     g = SimGimbal(90)
-    a = Aimer(g)
+    a = Aimer(g, tilt_window=(0, 45))                       # the window the dashboard really uses
     last, moves = (g.pan, g.tilt), 0
     for _ in range(150):                                   # ~10 s at 15 fps, 4 px of box-center noise
         a.update(rnd.gauss(0, 4) / 320, rnd.gauss(0, 4) / 240)
@@ -166,10 +167,10 @@ def test():
 
     g = SimGimbal(90)                                 # tilt can't leave its range either
     a = Aimer(g, mode="follow")
-    for _ in range(40):
+    for _ in range(120):
         a.update(0.0, -1.0)
     assert g.tilt == TILT_RANGE[0] and in_range(g)
-    for _ in range(40):
+    for _ in range(120):
         a.update(0.0, 1.0)
     assert g.tilt == TILT_RANGE[1] and in_range(g)
 

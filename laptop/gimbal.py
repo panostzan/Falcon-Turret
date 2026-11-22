@@ -15,9 +15,16 @@ from collections import deque
 import serial
 
 PAN_RANGE = (0, 180)
-TILT_RANGE = (0, 60)         # the bracket allows about 0-45; the firmware clamps tilt to this too (old firmware: 90-180)
+TILT_RANGE = (0, 180)        # what the firmware accepts. The usable range is smaller and is a SOFTWARE limit: see tilt_limits below
 TILT_HOME = 22               # the firmware's start position for tilt
 CENTER = (90, TILT_HOME)
+
+
+def default_tilt_limits():
+    """The software limit on tilt: the calibration made with tools/tilt_watch.py, else 0-45. Nothing in the firmware limits it."""
+    import tilt_calibration
+    window, _ = tilt_calibration.load()
+    return window or (0, 45)
 _REPLY = re.compile(r"P(\d+)\s+T(\d+)")
 
 
@@ -62,9 +69,12 @@ def _clamp(v, lo, hi):
 
 
 class Gimbal:
-    def __init__(self, port=None, baud=115200, link=None, settle_s=2.0):
+    def __init__(self, port=None, baud=115200, link=None, settle_s=2.0, tilt_limits=None):
         """port: 'COM7' (USB serial) or 'udp:192.168.137.50' (Wi-Fi firmware).
-        link: a pre-opened serial-like object (used by tests)."""
+        link: a pre-opened serial-like object (used by tests).
+        tilt_limits: (low, high) the tilt is never commanded outside. Default: the saved calibration, else 0-45. Pass
+        TILT_RANGE for no limit (the calibration tool does)."""
+        self.tilt_limits = tuple(tilt_limits) if tilt_limits else default_tilt_limits()
         if link is None and str(port).startswith("udp:"):
             link = UdpLink(port[4:])
         elif link is None:
@@ -114,7 +124,7 @@ class Gimbal:
         """Absolute move. Sends only the axes that actually change; angles are clamped to safe ranges."""
         if pan is not None and (p := _clamp(pan, *PAN_RANGE)) != self.pan:
             self._send(f"P{p}")
-        if tilt is not None and (t := _clamp(tilt, *TILT_RANGE)) != self.tilt:
+        if tilt is not None and (t := _clamp(tilt, *self.tilt_limits)) != self.tilt:
             self._send(f"T{t}")
         return self.pan, self.tilt
 
@@ -158,7 +168,7 @@ class AsyncGimbal:
             if pan is not None:
                 self.pan = self._want["P"] = _clamp(pan, *PAN_RANGE)
             if tilt is not None:
-                self.tilt = self._want["T"] = _clamp(tilt, *TILT_RANGE)
+                self.tilt = self._want["T"] = _clamp(tilt, *self._g.tilt_limits)
         self._wake.set()
         return self.pan, self.tilt
 
