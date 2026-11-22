@@ -4,52 +4,67 @@
 <title>Turret diagnostics</title>
 <link rel="stylesheet" href="/ui.css">
 <style>
-  /* One verdict, one list of systems, the alerts, and two measurements. Space separates them; there are no panels. Green only
-     means "operating"; amber is degraded, red is a mission-critical fault. */
-  .diag { flex: 1; min-height: 0; display: grid; gap: 0 56px; grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr); grid-template-rows: auto minmax(0, 1fr); }
-  .diag h2 { margin: 0 0 14px; font-size: 13px; font-weight: 400; color: var(--dim); }
-  .col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  /* Three questions, top to bottom and left to right: is it healthy (the banner), what is wrong (Needs attention), how fast is it (Speed).
+     The system list is the one place every part is named with its state. Nothing is shown twice. */
+  .diag { flex: 1; min-height: 0; display: grid; gap: 12px; grid-template-columns: minmax(340px, 0.9fr) minmax(0, 1.35fr); grid-template-rows: auto minmax(0, 1fr); }
+  .diag .panel { min-width: 0; min-height: 0; overflow: hidden; padding: 14px 18px; display: flex; flex-direction: column; }
+  .diag .panel > * { flex-shrink: 0; }
+  .diag h2 { margin: 0 0 12px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .diag h2 small { font: 400 13px var(--font); letter-spacing: 0; text-transform: none; color: var(--dim); }
+  .col { display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; }
+  .col .grow { flex: 1 1 0; min-height: 0; }
+  .col .grow.scrolls { overflow-y: auto; }
 
-  .verdict { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 20px; padding: 6px 0 26px; }
-  .verdict .word { font: 600 32px/1 var(--font); white-space: nowrap; }
-  .verdict .word::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 14px; border-radius: 50%; background: var(--dim); vertical-align: middle; }
-  .verdict .line { font-size: 16px; color: var(--dim); min-width: 0; }
-  .verdict.ok .word::before { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-  .verdict.warn .word { color: var(--warn); } .verdict.warn .word::before { background: var(--warn); }
-  .verdict.bad .word { color: var(--alarm); } .verdict.bad .word::before { background: var(--alarm); }
+  .banner { grid-column: 1 / -1; display: flex; align-items: center; gap: 22px; padding: 14px 20px; background: var(--panel); border: 1px solid var(--line); border-left: 6px solid var(--dim); }
+  .banner .word { font: 700 30px/1 var(--font); white-space: nowrap; }
+  .banner .line { font-size: 16px; line-height: 1.35; color: var(--text); min-width: 0; }
+  .banner.ok { border-left-color: var(--ok); } .banner.ok .word { color: var(--ok); }
+  .banner.warn { border-left-color: var(--warn); } .banner.warn .word { color: var(--warn); }
+  .banner.bad { border-left-color: var(--alarm); } .banner.bad .word { color: var(--alarm); }
 
-  ul.sys { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
-  ul.sys li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 0 4px; }
-  ul.sys li::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--dim); opacity: .45; }
-  ul.sys li.ok::before { background: var(--ok); opacity: 1; box-shadow: 0 0 6px var(--ok); }
-  ul.sys li.warn::before { background: var(--warn); opacity: 1; } ul.sys li.bad::before { background: var(--alarm); opacity: 1; }
-  ul.sys li.off::before { background: none; border: 1px solid var(--dim); opacity: .7; }
-  ul.sys .nm { font-size: 15px; } ul.sys .nt { grid-column: 2; font-size: 12px; color: var(--dim); }
-  ul.sys .vl { grid-column: 3; grid-row: 1 / span 2; font: 400 21px var(--font); text-align: right; white-space: nowrap; }
-  ul.sys li.warn .vl { color: var(--warn); } ul.sys li.bad .vl { color: var(--alarm); } ul.sys li.off .vl, ul.sys li.off .nm { color: var(--dim); }
+  /* systems: one row per part */
+  ul.systems { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; justify-content: space-between; }
+  ul.systems li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; padding: 5px 0 5px 14px; border-top: 1px solid var(--line); border-left: 4px solid var(--line); margin-left: -4px; }
+  ul.systems li:first-child { border-top: 0; }
+  ul.systems li.ok { border-left-color: var(--ok); } ul.systems li.warn { border-left-color: var(--warn); } ul.systems li.bad { border-left-color: var(--alarm); }
+  ul.systems .nm { font: 600 16px var(--font); } ul.systems .nt { grid-column: 1; font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  ul.systems .vl { grid-row: 1 / span 2; grid-column: 2; font: 600 20px var(--mono); text-align: right; white-space: nowrap; }
+  ul.systems li.warn .vl { color: var(--warn); } ul.systems li.bad .vl { color: var(--alarm); } ul.systems li.off .vl { color: var(--dim); font-size: 16px; } ul.systems li.off .nm { color: var(--dim); }
 
-  .alerts { list-style: none; margin: 0 0 30px; padding: 0; display: flex; flex-direction: column; gap: 9px; min-height: 40px; }
-  .alerts li { display: grid; grid-template-columns: 22px minmax(0, 1fr); font-size: 14px; line-height: 1.4; }
-  .alerts li::before { content: ""; width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: var(--warn); }
-  .alerts li.bad::before { background: var(--alarm); } .alerts li.bad b { color: var(--alarm); } .alerts li.warn b { color: var(--warn); }
-  .alerts li.adv::before { background: none; border: 1px solid var(--dim); } .alerts li.adv b { color: var(--text); font-weight: 400; }
-  .alerts .fx { display: block; color: var(--dim); font-size: 13px; }
-  .alerts .none { color: var(--dim); } .alerts .none::before { display: none; }
+  /* needs attention */
+  ol.issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 150px; overflow: auto; }
+  ol.issues li { padding: 10px 14px; background: var(--raise); border-left: 4px solid var(--line); }
+  ol.issues li.bad { border-left-color: var(--alarm); } ol.issues li.warn { border-left-color: var(--warn); }
+  ol.issues b { display: block; font-size: 16px; } ol.issues li.bad b { color: var(--alarm); } ol.issues li.warn b { color: var(--warn); }
+  ol.issues .why { display: block; font-size: 14px; margin-top: 3px; line-height: 1.4; }
+  ol.issues .fix { display: block; font-size: 14px; margin-top: 4px; color: var(--teal); }
+  .clear { padding: 4px 0; color: var(--ok); font: 600 16px var(--font); } .clear small { display: block; color: var(--dim); font: 400 14px var(--font); margin-top: 3px; }
 
-  .meas { margin-bottom: 26px; }
-  .meas .hd { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; font-size: 13px; color: var(--dim); }
-  .meas .hd b { font: 400 16px var(--font); color: var(--text); }
-  .strip { position: relative; height: 96px; }
-  .strip canvas { position: absolute; inset: 0; width: 100%; height: 100% !important; margin: 0 !important; background: none !important; border: 0 !important; }
-  .ruler { display: flex; gap: 2px; height: 16px; margin-bottom: 8px; }
-  .ruler i { flex: 0 0 9px; background: var(--c); } .ruler i.gap { flex-basis: 9px; background: none; border-bottom: 1px solid var(--line); }
-  .parts { display: flex; flex-wrap: wrap; gap: 4px 22px; font-size: 13px; color: var(--dim); }
-  .parts span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; background: var(--c); }
-  .parts b { color: var(--text); font-weight: 400; }
+  /* speed */
+  .lead { font-size: 14px; line-height: 1.4; margin: 0 0 12px; padding: 10px 14px; background: var(--raise); border-left: 4px solid var(--teal); }
+  .lead b { color: var(--teal); font-weight: 600; }
+  .sub-h { font-size: 13px; color: var(--dim); margin: 0 0 6px; display: flex; justify-content: space-between; gap: 10px; }
+  .sub-h b { color: var(--text); font-weight: 500; text-align: right; }
+  .gapbox { flex: 1; min-height: 120px; position: relative; margin-bottom: 12px; }
+  .gapbox canvas { position: absolute; inset: 0; width: 100%; height: 100% !important; margin: 0 !important; }
+  .budget { display: flex; height: 24px; background: #020301; border: 1px solid var(--line); }
+  .budget i { display: block; height: 100%; min-width: 3px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 14px; margin: 7px 0 12px; color: var(--dim); }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; background: var(--c); }
+  .legend b { color: var(--text); font-weight: 500; font-family: var(--mono); }
+  .cmp { display: grid; gap: 6px; font-size: 14px; margin-bottom: 4px; }
+  .cmp div { display: grid; grid-template-columns: 100px minmax(0, 1fr) 245px; align-items: center; gap: 10px; }
+  .cmp .track { height: 12px; background: #020301; border: 1px solid var(--line); } .cmp .track i { display: block; height: 100%; }
+  .cmp .val { text-align: right; font: 13px var(--mono); white-space: nowrap; } .cmp .dim { color: var(--dim); }
 
-  .events { margin-top: auto; padding-top: 18px; font-size: 13px; color: var(--dim); display: flex; flex-direction: column; gap: 3px; }
-  .events div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .events span { display: inline-block; width: 70px; }
-  @media (max-width: 1000px) { html, body { height: auto; } .diag { grid-template-columns: 1fr; grid-template-rows: none; } .verdict { flex-wrap: wrap; } }
+  /* events and readings */
+  .events { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 5px; font-size: 14px; }
+  .events div { display: flex; gap: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .events span { color: var(--dim); font-family: var(--mono); font-size: 13px; width: 88px; flex: none; }
+  details.more { margin-top: 10px; font-size: 14px; } details.more summary { cursor: pointer; color: var(--dim); }
+  details.more table { width: 100%; margin-top: 6px; } details.more th { text-align: left; color: var(--dim); font-weight: 400; padding: 2px 0; } details.more td { text-align: right; font-family: var(--mono); font-size: 13px; }
+  details.more td.na { color: var(--dim); }
+
+  @media (max-width: 1000px) { html, body { height: auto; } .diag { grid-template-columns: 1fr; grid-template-rows: none; } .banner { flex-wrap: wrap; } .gapbox { min-height: 160px; } .cmp div { grid-template-columns: 90px 1fr; } .cmp .val { grid-column: 1 / -1; text-align: left; } }
 </style>
 
 <header class="top">
@@ -59,26 +74,27 @@
 </header>
 
 <main class="diag">
-  <section class="verdict" id="verdict"><div class="word" id="v-title">Checking</div><div class="line" id="v-sub"></div></section>
+  <section class="banner" id="banner"><div class="word" id="v-title">Checking…</div><div class="line" id="v-sub"></div></section>
 
   <div class="col">
-    <h2>Systems</h2>
-    <ul class="sys" id="sys"></ul>
-    <div class="events" id="log"></div>
+    <section class="panel grow"><h2>Systems <small>each part and how it is doing</small></h2><ul class="systems" id="systems"></ul></section>
+    <section class="panel" style="height:150px"><h2>Recent events</h2><div class="events" id="log"><span>No events yet.</span></div></section>
   </div>
 
   <div class="col">
-    <h2>Alerts</h2>
-    <ul class="alerts" id="alerts"></ul>
-    <div class="meas">
-      <div class="hd"><span>Picture interval</span><b id="gap-now">–</b></div>
-      <div class="strip"><canvas id="c-gap"></canvas></div>
-    </div>
-    <div class="meas">
-      <div class="hd"><span>Aiming latency</span><b id="lat-total">–</b></div>
-      <div class="ruler" id="ruler"></div>
-      <div class="parts" id="parts"></div>
-    </div>
+    <section class="panel"><h2>Needs attention <small id="issue-count"></small></h2><ol class="issues" id="issues"></ol></section>
+    <section class="panel grow scrolls">
+      <h2>Speed</h2>
+      <p class="lead" id="lead">Measuring…</p>
+      <div class="sub-h">Gap between video pictures <b id="gap-now">–</b></div>
+      <div class="gapbox"><canvas id="c-gap"></canvas></div>
+      <div class="sub-h">Aiming delay, where the time goes <b id="budget-total">–</b></div>
+      <div class="budget" id="budget"></div>
+      <div class="legend" id="budget-legend"></div>
+      <div class="sub-h">Round trip of a control message <b>shorter is better</b></div>
+      <div class="cmp" id="cmp"></div>
+      <details class="more"><summary>More readings</summary><table id="readings"></table></details>
+    </section>
   </div>
 </main>
 
@@ -86,149 +102,185 @@
 <script>
 let S = null, SYS = null, TEL = null;
 const ms = v => (v == null ? '–' : (v >= 100 ? Math.round(v) : Number(v).toFixed(v < 10 ? 1 : 0)) + ' ms');
-const TONES = ['#dfe6cf', '#a9b595', '#7b8668', '#566048'];     // the latency ruler's four parts, light to dark
 
-/* Mission-critical parts (camera, tracker, control link, servo driver) decide the verdict. Everything else is an advisory.
-   state: ok, warn (degraded), bad (fault), off (not in use). */
+/* Turn the raw numbers into tiles (one per subsystem), a ranked list of issues, and an overall verdict.
+   state: ok (good), warn (works but degraded), bad (broken), off (not in use, not a problem). */
 function assess() {
   const s = S;
   if (!s) return null;
   const q = s.qnx || {}, cam = s.camera || {}, rtt = q.rtt || {}, st = TEL ? TEL.stats : null;
   const udp = rtt.udp && rtt.udp.n ? rtt.udp : null, gap = st && st.interval_ms && st.interval_ms.n ? st.interval_ms : null;
   const onPi = s.source === 'Pi', noPic = !s.connected || s.frame_age > 2.5;
-  const rows = [], alerts = [];
-  const row = (name, state, value, note) => rows.push({ name, state, value, note });
-  const alert = (sev, title, why, fix) => alerts.push({ sev, title, why, fix });
+  const tiles = [], issues = [];
+  const tile = (name, state, value, sub) => tiles.push({ name, state, value, sub });
+  const issue = (sev, title, why, fix) => issues.push({ sev, title, why, fix });
 
   // Camera
   if (noPic) {
     const gone = cam.state === 'stalled' && cam.usb === false;
-    row('Camera', 'bad', gone ? 'not on USB' : 'no frames', onPi ? 'Pi' : s.source);
-    alert('bad', gone ? 'Camera not detected on the Pi' : 'No frames arriving', gone ? '' : cam.state === 'stalled' ? 'The Pi sees the camera but receives nothing.' : `Nothing for ${Math.round(s.frame_age)} s.`,
-      gone ? 'Replug the camera; check the Pi power supply.' : 'Check the camera cable, the hotspot and the Pi power.');
+    tile('Camera', 'bad', gone ? 'not detected' : 'no picture', onPi ? 'on the Pi' : s.source);
+    issue('bad', gone ? 'The Pi cannot see its camera' : 'No pictures are arriving',
+      gone ? 'The camera has dropped off the Pi\'s USB, so there is no video, tracking or depth.'
+           : cam.state === 'stalled' ? 'The Pi sees the camera but nothing is coming from it.' : `Nothing has arrived from ${onPi ? 'the Pi' : s.source} for ${Math.round(s.frame_age)} s.`,
+      gone ? 'Unplug the camera and plug it back in firmly.' : onPi ? 'Check the camera cable, then the hotspot and the Pi\'s power.' : 'Check the camera is not used by another program.');
   } else if (s.fps < 10) {
-    row('Camera', 'warn', `${s.fps} fps`, `${s.kb} KB/frame`);
-    alert('warn', 'Low frame rate', `${s.fps} fps (nominal 15).`, 'Add light to the scene.');
-  } else row('Camera', 'ok', `${s.fps} fps`, `${s.kb} KB/frame`);
+    tile('Camera', 'warn', `${s.fps} fps`, 'slow, normal is 15');
+    issue('warn', 'The camera is slow', `Only ${s.fps} pictures per second are arriving (normal is about 15).`, 'Add light to the scene, or check the link.');
+  } else tile('Camera', 'ok', `${s.fps} fps`, `${s.kb} KB per picture`);
 
-  // Video link
-  if (!onPi) row('Video link', 'off', 'n/a', s.source);
-  else if (noPic) row('Video link', 'bad', 'down', '');
+  // Video link (the Wi-Fi)
+  if (!onPi) tile('Video link', 'off', 'not used', s.source);
+  else if (noPic) tile('Video link', 'bad', 'down', '');
   else if (gap) {
     const bad = gap.p95 >= 500, warn = gap.p95 >= 150;
-    row('Video link', bad ? 'bad' : warn ? 'warn' : 'ok', ms(gap.p50), `p95 ${ms(gap.p95)}`);
-    if (warn) alert(bad ? 'bad' : 'warn', 'Video arrives in bursts', `p95 interval ${Math.round(gap.p95)} ms. Aiming is not affected.`, 'Move the laptop closer to the Pi, or use a separate 2.4 GHz network.');
-  } else row('Video link', 'off', '…', '');
+    tile('Video link', bad ? 'bad' : warn ? 'warn' : 'ok', ms(gap.p50), `worst 5%: ${ms(gap.p95)}`);
+    if (warn) issue(bad ? 'bad' : 'warn', 'Video arrives in bursts',
+      `Pictures are sometimes ${Math.round(gap.p95)} ms apart (worst ${Math.round(gap.max)} ms), usually Wi-Fi congestion on the hotspot. ` +
+      (udp && udp.p95 < 50 ? 'Aiming is not affected: it uses the fast control channel.' : 'Aiming may be affected as well.'),
+      'Move the laptop closer to the Pi, or use a separate 2.4 GHz network (phone hotspot or router).');
+  } else tile('Video link', 'off', 'measuring', '');
 
-  // QNX tracker
-  if (!onPi) row('QNX tracker', 'off', 'n/a', 'laptop webcam');
-  else if (q.present && q.used) row('QNX tracker', 'ok', ms(q.proc_ms), `${q.state}${q.armed ? ', armed' : ''}`);
-  else if (q.present && !s.armed) row('QNX tracker', 'ok', 'standby', 'no target set');
-  else if (q.present && !s.view.qnx) row('QNX tracker', 'off', 'disabled', 'laptop tracker');
-  else if (q.present) { row('QNX tracker', 'warn', 'stale', 'laptop tracker active'); alert('warn', 'QNX answers are stale', 'The laptop tracker has taken over.', 'Clears when the link recovers.'); }
-  else { row('QNX tracker', 'bad', 'no reply', 'Pi'); alert('bad', 'QNX tracker not answering', 'The watchdog is not protecting the turret.', 'Check the Pi, then restart the dashboard.'); }
+  // QNX brain
+  if (!onPi) tile('QNX brain', 'off', 'not used', 'laptop webcam');
+  else if (q.present && q.used) tile('QNX brain', 'ok', `${q.proc_ms} ms`, `${q.state}${q.armed ? ' ARMED' : ''}, tracking`);
+  else if (q.present && !s.armed) tile('QNX brain', 'ok', 'standby', 'pick a target to start');
+  else if (q.present && !s.view.qnx) tile('QNX brain', 'off', 'switched off', 'laptop tracker in use');
+  else if (q.present) { tile('QNX brain', 'warn', 'not tracking', 'laptop tracker in use'); issue('warn', 'QNX is not tracking', 'The Pi is answering, but its answers are too old to use, so the laptop tracker has taken over.', 'Check the Wi-Fi link; this clears by itself when answers are fresh again.'); }
+  else { tile('QNX brain', 'bad', 'not answering', 'the Pi'); issue('bad', 'The QNX tracker is not answering', 'The program on the Pi (the tracker and the safety interlock) is not reporting, so the laptop tracker is the fallback and the watchdog is not protecting you.', 'Check the Pi is on and the camera is plugged in, then restart the dashboard.'); }
 
-  // Control link
-  if (!onPi || !q.present) row('Control link', 'off', onPi ? 'no QNX' : 'n/a', '');
-  else if (!udp) { row('Control link', 'bad', 'no reply', 'UDP'); alert('bad', 'No UDP replies from the Pi', 'Control falls back to the video stream.', 'Allow Python through the Windows firewall (private networks).'); }
+  // Control link (UDP)
+  if (!onPi || !q.present) tile('Control link', 'off', onPi ? 'no QNX' : 'not used', '');
+  else if (!udp) { tile('Control link', 'bad', 'no answers', 'UDP channel'); issue('bad', 'The fast control channel is silent', 'The dashboard is not getting UDP answers from the Pi (a firewall may be blocking them), so control rides the slow video stream.', 'Allow Python through the Windows firewall for private networks.'); }
   else {
     const bad = udp.p95 >= 100, warn = udp.p95 >= 30;
-    row('Control link', bad ? 'bad' : warn ? 'warn' : 'ok', ms(udp.p50), `p95 ${ms(udp.p95)}`);
-    if (warn) alert(bad ? 'bad' : 'warn', 'Control link is slow', `p95 round trip ${Math.round(udp.p95)} ms.`, 'Check the Wi-Fi between the laptop and the Pi.');
+    tile('Control link', bad ? 'bad' : warn ? 'warn' : 'ok', ms(udp.p50), `worst 5%: ${ms(udp.p95)}`);
+    if (warn) issue(bad ? 'bad' : 'warn', 'The control link is slow', `Control messages take up to ${Math.round(udp.p95)} ms round trip.`, 'Check Wi-Fi quality between the laptop and the Pi.');
   }
-  if (q.present && q.link === false) alert('bad', 'Watchdog tripped: turret disarmed', 'The Pi stopped receiving heartbeats.', 'Restore the link, then arm again.');
+  if (q.present && q.link === false) issue('bad', 'QNX lost the laptop and disarmed the turret', 'The watchdog on the Pi stopped getting heartbeats and put the turret in its safe state.', 'Check the link, then arm again when it is back.');
 
-  // Servo driver
-  if (s.error && /gimbal/i.test(s.error)) { row('Servo driver', 'bad', 'error', ''); alert('bad', 'Servo driver not responding', s.error, 'Check the Feather USB cable and that nothing else holds the port.'); }
-  else if (s.angles) row('Servo driver', 'ok', `Pan ${s.angles[0]}° · Tilt ${s.angles[1]}°`, 'connected');
-  else row('Servo driver', 'off', 'idle', 'opens on Start tracking');
+  // Gimbal
+  if (s.error && /gimbal/i.test(s.error)) { tile('Gimbal', 'bad', 'error', 'see below'); issue('bad', 'The gimbal is not responding', s.error, 'Check the ESP is plugged in and powered, and nothing else holds the port.'); }
+  else if (s.angles) tile('Gimbal', 'ok', `${s.angles[0]}° / ${s.angles[1]}°`, 'pan / tilt');
+  else tile('Gimbal', 'off', 'off', 'opens on Start tracking');
 
-  // Depth network
-  if (s.depth_error) { row('Depth network', 'warn', 'error', ''); alert('adv', 'Depth network failed to start', s.depth_error, ''); }
-  else if (!s.view.depth && !s.view.depthcheck && !s.view.cutout) row('Depth network', 'off', 'off', '');
-  else if (s.depth && s.depth.fps < 5) row('Depth network', 'warn', `${s.depth.fps} fps`, `${s.depth.ms} ms/frame`);
-  else row('Depth network', 'ok', s.depth ? `${s.depth.fps} fps` : 'loading', s.depth ? `${s.depth.ms} ms/frame` : '');
+  // Depth AI
+  if (s.depth_error) { tile('Depth AI', 'bad', 'error', ''); issue('warn', 'Depth failed to start', s.depth_error, 'Close other programs to free memory, then switch Depth on again.'); }
+  else if (!s.view.depth && !s.view.depthcheck && !s.view.cutout) tile('Depth AI', 'off', 'off', 'switch on in Layers');
+  else if (s.depth && s.depth.fps < 5) { tile('Depth AI', 'warn', `${s.depth.fps} fps`, `${s.depth.ms} ms each`); }
+  else tile('Depth AI', 'ok', s.depth ? `${s.depth.fps} fps` : 'loading', s.depth ? `${s.depth.ms} ms each` : '');
 
-  // Host
+  // This computer
   const free = SYS ? SYS.ram_free_gb : null;
-  if (free == null) row('Host', 'off', '…', '');
+  if (free == null) tile('This computer', 'off', '…', '');
   else {
-    row('Host', free < 1.0 ? 'warn' : 'ok', `${free} GB free`, `CPU ${SYS.cpu_process_pct}%`);
-    if (free < 1.0) alert('adv', 'Laptop memory low', `${free} GB free.`, '');
+    const bad = free < 1.0, warn = free < 1.6;
+    tile('This computer', bad ? 'bad' : warn ? 'warn' : 'ok', `${free} GB free`, `server ${SYS.process_mb} MB, CPU ${SYS.cpu_process_pct}%`);
+    if (warn) issue(bad ? 'bad' : 'warn', 'The laptop is short of memory', `Only ${free} GB is free. A hotspot or the depth AI can stall when memory runs low.`, 'Close Fusion 360, the QNX Software Center and extra Chrome tabs.');
   }
 
-  const critical = ['Camera', 'QNX tracker', 'Control link', 'Servo driver'];
-  const crit = rows.filter(r => r.state === 'bad' && critical.includes(r.name));
-  const other = rows.filter(r => r.state === 'bad' || r.state === 'warn').filter(r => !crit.includes(r) && !(r.name === 'Host'));
-  const order = { bad: 0, warn: 1, adv: 2 };
-  alerts.sort((a, b) => order[a.sev] - order[b.sev]);
-  const verdict = crit.length || alerts.some(a => a.sev === 'bad') ? { state: 'bad', title: 'Fault', sub: alerts.filter(a => a.sev === 'bad').map(a => a.title).slice(0, 2).join(' · ') }
-    : other.length || alerts.some(a => a.sev === 'warn') ? { state: 'warn', title: 'Degraded', sub: alerts.filter(a => a.sev === 'warn').map(a => a.title).slice(0, 2).join(' · ') }
-    : { state: 'ok', title: 'Operational', sub: alerts.length ? 'Advisory only' : '' };
-  return { rows, alerts, verdict };
+  issues.sort((a, b) => (a.sev === 'bad' ? 0 : 1) - (b.sev === 'bad' ? 0 : 1));
+  const bads = tiles.filter(t => t.state === 'bad').length, warns = tiles.filter(t => t.state === 'warn').length;
+  const verdict = bads ? { state: 'bad', title: 'Not ready', sub: issues.filter(i => i.sev === 'bad').map(i => i.title).slice(0, 2).join(' · ') }
+    : warns ? { state: 'warn', title: 'Degraded', sub: issues.map(i => i.title).slice(0, 2).join(' · ') || 'Running with reduced performance' }
+    : { state: 'ok', title: 'All systems go', sub: 'Camera, link and tracker are healthy' };
+  return { tiles, issues, verdict };
 }
 
-function latency() {
-  const s = S, q = s.qnx || {}, rtt = q.rtt || {}, st = TEL ? TEL.stats : null, parts = [];
-  if (q.used && q.proc_ms != null) parts.push(['Tracker', q.proc_ms]);
-  if (rtt.udp && rtt.udp.n) parts.push(['Link', rtt.udp.p50]);
-  if (st && st.proc_ms && st.proc_ms.n) parts.push(['Laptop', st.proc_ms.p50]);
-  if (TEL && TEL.servo_rtt_ms != null) parts.push(['Servo', TEL.servo_rtt_ms]);
+function budget() {
+  const s = S, q = s.qnx || {}, rtt = q.rtt || {}, st = TEL ? TEL.stats : null;
+  const parts = [];
+  if (q.used && q.proc_ms != null) parts.push(['QNX tracking', q.proc_ms, '#b6e23a']);
+  if (rtt.udp && rtt.udp.n) parts.push(['Control link', rtt.udp.p50, '#ffb000']);
+  if (st && st.proc_ms && st.proc_ms.n) parts.push(['Laptop processing', st.proc_ms.p50, '#8b9777']);
+  if (TEL && TEL.servo_rtt_ms != null) parts.push(['Servo command', TEL.servo_rtt_ms, '#4fd6c4']);
   return parts;
 }
 
-/* One tick per picture: its height is the time since the previous picture. Ticks past 150 ms turn amber. */
-function drawStrip(canvas, values) {
+/* The gap chart, with a scale in ms and the "slow" zone shaded (the page calls a video link slow when the slowest 5% of gaps pass 150 ms). */
+function drawGap(canvas, values) {
   if (!canvas || !canvas.getContext) return;
-  const dpr = window.devicePixelRatio || 1, W = canvas.clientWidth || 400, H = canvas.clientHeight || 90;
+  const dpr = window.devicePixelRatio || 1, W = canvas.clientWidth || 400, H = canvas.clientHeight || 110;
   canvas.width = W * dpr; canvas.height = H * dpr;
   const g = canvas.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
-  const vals = (values || []).filter(v => v != null).slice(-Math.floor(W / 3));
-  const max = Math.max(250, ...vals), y = v => H - 14 - (H - 18) * Math.min(1, v / max);
-  g.font = '12px system-ui, "Segoe UI", sans-serif'; g.textBaseline = 'middle';
-  g.setLineDash([2, 4]); g.strokeStyle = '#3a4528'; g.lineWidth = 1; g.beginPath(); g.moveTo(0, y(150)); g.lineTo(W, y(150)); g.stroke(); g.setLineDash([]);
-  g.fillStyle = '#8b9777'; g.textAlign = 'right'; g.fillText('150 ms', W, y(150) - 8); g.textAlign = 'left';
-  if (vals.length < 2) { g.fillText('waiting for frames', 0, H / 2); return; }
-  vals.forEach((v, i) => {
-    g.fillStyle = v > 150 ? '#ffb000' : '#a9b595';
-    const step = W / vals.length, h = Math.max(2, H - 14 - y(v)); g.fillRect(i * step, H - 14 - h, Math.max(1.5, step * 0.5), h);
-  });
-  g.fillStyle = '#8b9777'; g.fillText('older', 0, H - 4); g.textAlign = 'right'; g.fillText('now', W, H - 4); g.textAlign = 'left';
+  const vals = (values || []).filter(v => v != null);
+  const padL = 52, top = 6, bottom = 4, max = Math.max(250, ...vals) * 1.08;
+  const y = v => top + (H - top - bottom) * (1 - v / max);
+  g.fillStyle = 'rgba(255,176,0,0.10)'; g.fillRect(padL, y(max), W - padL, y(150) - y(max));          // the slow zone
+  g.font = '12px system-ui, "Segoe UI", sans-serif'; g.textBaseline = 'middle'; g.lineWidth = 1;
+  for (const t of [0, 100, 200, 300, 400].filter(t => t <= max)) {
+    g.strokeStyle = '#222b19'; g.beginPath(); g.moveTo(padL, y(t)); g.lineTo(W, y(t)); g.stroke();
+    g.fillStyle = '#8b9777'; g.fillText(t + ' ms', 2, y(t));
+  }
+  g.fillStyle = '#ffb000'; g.textAlign = 'right'; g.fillText('slow', W - 6, y(150) - 9); g.textAlign = 'left';
+  if (vals.length < 2) { g.fillStyle = '#8b9777'; g.fillText('waiting for pictures…', padL + 12, H / 2); return; }
+  g.strokeStyle = '#b6e23a'; g.lineWidth = 1.8; g.beginPath();
+  vals.forEach((v, i) => { const px = padL + (W - padL) * i / (vals.length - 1); i ? g.lineTo(px, y(v)) : g.moveTo(px, y(v)); });
+  g.stroke();
 }
 
+const dot = s => s;
 function render() {
   const a = assess();
-  if (!a) { $('v-title').textContent = 'No server'; $('v-sub').textContent = 'The dashboard server is not reachable.'; $('verdict').className = 'verdict bad'; return; }
-  const s = S, st = TEL ? TEL.stats : null, gap = st && st.interval_ms && st.interval_ms.n ? st.interval_ms : null;
-  $('verdict').className = 'verdict ' + a.verdict.state;
-  $('v-title').textContent = a.verdict.title; $('v-sub').textContent = a.verdict.sub;
-  $('sys').innerHTML = a.rows.map(r => `<li class="${r.state}"><span class="nm">${r.name}</span><span class="nt">${r.note || '&nbsp;'}</span><span class="vl">${r.value}</span></li>`).join('');
-  const shown = a.alerts.slice(0, 4);
-  $('alerts').innerHTML = shown.length
-    ? shown.map(x => `<li class="${x.sev === 'adv' ? 'adv' : x.sev}"><span><b>${x.title}</b>${x.why ? ' ' + x.why : ''}${x.fix && x.sev !== 'adv' ? `<span class="fx">${x.fix}</span>` : ''}</span></li>`).join('') + (a.alerts.length > 4 ? `<li class="adv"><span>+${a.alerts.length - 4} more</span></li>` : '')
-    : '<li class="none"><span>None</span></li>';
-  $('gap-now').textContent = gap ? `${ms(gap.p50)} median · ${ms(gap.p95)} p95` : '–';
-  const parts = latency(), total = parts.reduce((x, p) => x + p[1], 0);
-  $('lat-total').textContent = parts.length ? ms(total) : '–';
-  const cells = []; parts.forEach(([n, v], i) => { for (let k = 0; k < Math.max(1, Math.round(v * 2)); k++) cells.push(`<i style="--c:${TONES[i]}"></i>`); });
-  $('ruler').innerHTML = cells.join('') || '<i class="gap"></i>';
-  $('parts').innerHTML = parts.map(([n, v], i) => `<span style="--c:${TONES[i]}">${n} <b>${ms(v)}</b></span>`).join('');
+  if (!a) { $('v-title').textContent = 'No server'; $('v-sub').textContent = 'The dashboard server is not reachable. Start it and reload.'; $('banner').className = 'banner bad'; return; }
+  const s = S, q = s.qnx || {}, st = TEL ? TEL.stats : null, rtt = q.rtt || {};
+  const gap = st && st.interval_ms && st.interval_ms.n ? st.interval_ms : null;
+
+  // 1. the banner
+  $('banner').className = 'banner ' + a.verdict.state;
+  $('v-title').textContent = a.verdict.title;
+  $('v-sub').textContent = a.verdict.sub;
+
+  // 2. systems, one row per part
+  $('systems').innerHTML = a.tiles.map(t => `<li class="${t.state}"><span class="nm">${t.name}</span><span class="nt">${t.sub || '&nbsp;'}</span><span class="vl">${t.value}</span></li>`).join('');
+
+  // 3. needs attention
+  $('issue-count').textContent = a.issues.length ? `${a.issues.length} item${a.issues.length > 1 ? 's' : ''}` : '';
+  $('issues').innerHTML = a.issues.length
+    ? a.issues.map(i => `<li class="${i.sev}"><b>${i.title}</b><span class="why">${i.why}</span><span class="fix">Fix: ${i.fix}</span></li>`).join('')
+    : '<div class="clear">Nothing needs attention<small>Everything that is switched on is working.</small></div>';
+
+  // 4. speed
+  const parts = budget(), total = parts.reduce((x, p) => x + p[1], 0);
+  const big = parts.length ? parts.reduce((m, p) => (p[1] > m[1] ? p : m)) : null;
+  const videoLate = gap ? gap.p95 : 0;
+  $('lead').innerHTML = !s.connected ? 'No pictures are arriving, so nothing else can be measured.'
+    : videoLate > Math.max(40, total * 2) ? `<b>Biggest delay: video over Wi-Fi.</b> Pictures can be ${Math.round(videoLate)} ms apart. Aiming does not wait for video: its own loop takes about ${ms(total)}.`
+    : big ? `<b>Aiming takes about ${ms(total)}</b> from picture to servo command, mostly ${big[0].toLowerCase()} (${ms(big[1])}).` : 'Waiting for data.';
+  $('gap-now').textContent = gap ? `typical ${ms(gap.p50)}, slowest 5%: ${ms(gap.p95)}` : '–';
+  $('budget-total').textContent = parts.length ? `about ${ms(total)}` : 'waiting for data';
+  $('budget').innerHTML = parts.map(([n, v, c]) => `<i title="${n}" style="width:${Math.max(1, v / total * 100)}%;background:${c}"></i>`).join('');
+  $('budget-legend').innerHTML = parts.map(([n, v, c]) => `<span style="--c:${c}">${n} <b>${ms(v)}</b></span>`).join('') || '<span style="--c:#222b19">no control-loop data yet</span>';
+  const cmpMax = Math.max(1, (rtt.udp && rtt.udp.p95) || 0, (rtt.stream && rtt.stream.p95) || 0);
+  const bar = (label, r, color) => r && r.n ? `<div><span>${label}</span><span class="track"><i style="width:${Math.max(2, r.p95 / cmpMax * 100)}%;background:${color}"></i></span><span class="val">${ms(r.p50)} typical, ${ms(r.p95)} slowest</span></div>` : `<div><span>${label}</span><span class="track"></span><span class="val dim">no data</span></div>`;
+  $('cmp').innerHTML = bar('Own channel', rtt.udp, '#b6e23a') + bar('Inside video', rtt.stream, '#ffb000');
+
+  const rd = (k, v, cls) => `<tr><th>${k}</th><td class="${cls || ''}">${v}</td></tr>`;
+  const cam = s.camera || {};
+  $('readings').innerHTML =
+    rd('Video source', s.source || 'Pi') + rd('Picture size', s.connected ? `${s.kb} KB` : '–') + rd('Pictures dropped', s.dropped) +
+    rd('Camera report', cam.state === 'ok' ? 'detected' : cam.state === 'stalled' ? (cam.usb === false ? 'not on USB' : 'silent') : 'none') +
+    rd('Target colour', s.armed ? 'set' : 'not set') + rd('Confidence', s.confidence != null ? Math.round(s.confidence * 100) + '%' : '–') +
+    rd('Mission (QNX)', q.present ? `${q.state}${q.armed ? ', ARMED' : ''}, shots ${q.shots}` : '–') +
+    rd('Distance sensor', 'not connected', 'na') + rd('IR emitter / receiver', 'not connected', 'na') +
+    (SYS ? rd('Uptime', Math.floor(SYS.uptime_s / 60) + ' min') + rd('Python', SYS.python) : '');
   setStatus(s);
 }
 
 function renderTelemetry(t) {
   TEL = t;
   if (t) {
-    drawStrip($('c-gap'), t.series.interval_ms);
+    drawGap($('c-gap'), t.series.interval_ms);
+    // each QNX event is also logged by the laptop a moment later: show it once
     const qe = (S && S.qnx && S.qnx.events || []).map(([ago, text]) => [ago, text]);
-    const all = t.events.concat(qe).sort((x, y) => x[0] - y[0]), seen = [], out = [];
-    for (const [ago, text] of all) {            // the laptop and the Pi both log each QNX event: show it once
+    const all = t.events.concat(qe).sort((a, b) => a[0] - b[0]);
+    const seen = [], out = [];
+    for (const [ago, text] of all) {
       const key = text.replace(/^QNX:\s*/, '');
       if (seen.some(([k, t0]) => k === key && Math.abs(t0 - ago) < 0.6)) continue;
       seen.push([key, ago]); out.push([ago, key]);
     }
     const fmt = ago => (ago < 90 ? Math.round(ago) + ' s' : Math.round(ago / 60) + ' min') + ' ago';
-    $('log').innerHTML = out.slice(0, 3).map(([ago, text]) => `<div><span>${fmt(ago)}</span>${text}</div>`).join('');
+    $('log').innerHTML = out.length ? out.slice(0, 4).map(([ago, text]) => `<div><span>${fmt(ago)}</span>${text}</div>`).join('') : '<div>No events yet.</div>';
   }
   render();
 }
@@ -236,5 +288,5 @@ function renderTelemetry(t) {
 poll('/state', 500, s => { S = s; render(); });
 poll('/system', 2000, x => { SYS = x; render(); });
 poll('/telemetry', 1000, renderTelemetry);
-window.addEventListener('resize', () => { if (TEL) drawStrip($('c-gap'), TEL.series.interval_ms); });
+window.addEventListener('resize', () => { if (TEL) drawGap($('c-gap'), TEL.series.interval_ms); });
 </script>
