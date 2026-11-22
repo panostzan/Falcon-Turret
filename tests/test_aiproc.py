@@ -30,6 +30,7 @@ open(fake, "w").write(
 
 got = []
 fw = aiproc.FaceWatch(got.append, [sys.executable, fake], hz=10.0, poll_s=0.05)
+check("the AI is off until the Face check is switched on", fw.enabled is False)
 fw.start()
 t0 = time.time()
 while fw.proc is None and time.time() - t0 < 5:
@@ -37,6 +38,11 @@ while fw.proc is None and time.time() - t0 < 5:
 check("the supervisor starts the program", fw.proc is not None and fw.proc.poll() is None)
 
 frame = bytes(FRAME)
+for _ in range(20):                                          # switched off: offers are ignored, no frame reaches the AI
+    fw.submit(frame)
+    time.sleep(0.02)
+check("switched off: no picture is handed to the AI", fw.frames_sent == 0, f"{fw.frames_sent} frames")
+fw.enabled = True
 sent = 0
 t0 = time.time()
 while time.time() - t0 < 1.0:                              # offer frames far faster than the limit

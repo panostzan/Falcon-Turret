@@ -311,6 +311,14 @@ def test_app():
     app.ctl["aimer"] = FakeAimer()
     app.fire_indicator()
     assert FakeGimbal.fired == 1, "a shot pulses the Feather's fire indicator"
+    ff.faces, ff.faces_at = {"n": 1, "ms": 11.0, "boxes": [(0.5, 0.5, 0.2, 0.3, 0.9)]}, time.time()
+    app.engage.human_gate = False
+    assert app.fresh_faces() is None, "Face check off: no boxes are drawn"
+    app.engage.human_gate = True
+    assert app.fresh_faces() is not None, "Face check on: the AI's boxes are shown"
+    ff.faces_at = time.time() - 5
+    assert app.fresh_faces() is None, "an old report is not shown"
+    app.engage.human_gate = False
     app.ctl["aimer"] = None
     app.fire_indicator()                                   # no gimbal open (not tracking): harmless
     assert app.engage.auto_fire is False, "the dashboard never lets the interlock shoot by itself"

@@ -508,7 +508,7 @@ def log_tracking_change(found, qnx, conf, now):
 def fresh_faces():
     """The AI face program's newest report if it is under 1.5 s old, else None."""
     f = feed_ref["feed"]
-    fc = getattr(f, "faces", None) if f else None
+    fc = getattr(f, "faces", None) if (f and engage.human_gate) else None         # boxes only while the Face check is on
     return fc if (fc and time.time() - getattr(f, "faces_at", 0.0) < 1.5) else None
 
 
@@ -619,6 +619,7 @@ def process(jpg, ts=None):
         send_pi(f"auto_scan {1 if engage.auto_scan else 0}")
         send_pi(f"autofire {1 if engage.auto_fire else 0}")
         send_pi(f"humangate {1 if engage.human_gate else 0}")
+        send_pi(f"faceai {'on' if engage.human_gate else 'off'}")
     roof_observe(now, bool(face) and tracker.confidence >= engage.min_confidence)   # a sure sighting wakes a dormant roof
     dmap = depth_map(frame)                          # also None when neither the Depth layer nor the depth check is on
     if face and dmap is not None:
@@ -908,6 +909,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/humangate":
             engage.human_gate = q.get("on", ["0"])[0] == "1"
             send_pi(f"humangate {1 if engage.human_gate else 0}")
+            send_pi(f"faceai {'on' if engage.human_gate else 'off'}")
             return self._send(b"{}")
         if url.path == "/fire":
             if not roof_ready():

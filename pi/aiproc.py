@@ -38,6 +38,7 @@ class FaceWatch:
         self._frame = None
         self._last = -1e9
         self.frames_sent = 0
+        self.enabled = False                       # off until the dashboard's Face check is switched on: then the AI gets no frames
         self.max_crashes, self.pause_s = MAX_CRASHES, PAUSE_S
 
     def start(self):
@@ -47,7 +48,7 @@ class FaceWatch:
     def submit(self, raw):
         """Offer the newest camera frame. Takes it at most FACE_HZ times a second; never waits."""
         now = self.clock()
-        if now - self._last < self.period or self.proc is None:
+        if not self.enabled or now - self._last < self.period or self.proc is None:
             return
         self._last = now
         with self._cv:

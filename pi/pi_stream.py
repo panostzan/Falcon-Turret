@@ -122,11 +122,19 @@ class Brain:
                         self.udp.sendto((f"P {line[5:]} {time.monotonic() * 1000:.3f}").encode(), addr)
                     except OSError:
                         pass
-                elif line and not self.monitor.handle(line):          # stress/rt lines belong to sysmon, the rest to turretd
+                elif line and not (self.monitor.handle(line) or self._local(line)):          # stress/rt lines belong to sysmon, faceai to us, the rest to turretd
                     try:
                         self.sock.sendto(line.encode() + b"\n", CONTROL)
                     except OSError:
                         pass
+
+    def _local(self, line):
+        """Control lines for the streamer itself: 'faceai on|off' switches the face AI's pictures on or off. True if it was one."""
+        if not line.startswith("faceai "):
+            return False
+        if self.face is not None:
+            self.face.enabled = line.split()[1:] == ["on"]
+        return True
 
     def _push_udp(self, text):
         """turretd's answer straight to the laptop, the moment it exists (not queued behind a video frame)."""
@@ -189,7 +197,8 @@ class Brain:
                     with self._cv:
                         self._out.append("P " + line[5:].decode(errors="replace").strip() + f" {time.monotonic() * 1000:.3f}")
                     continue
-                if self.monitor.handle(line.decode(errors="replace")):
+                text = line.decode(errors="replace")
+                if self.monitor.handle(text) or self._local(text):
                     continue
                 try:
                     self.sock.sendto(line + b"\n", CONTROL)
