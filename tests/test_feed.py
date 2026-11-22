@@ -52,5 +52,31 @@ def test():
     print(f"frame feed tests passed (consumed {len(nums)}, dropped {feed.dropped})")
 
 
+def test_reader_survives_errors():
+    """A crash inside the stream reader must not kill the video for good: it is logged and the reader reconnects."""
+    calls = []
+
+    def flaky_stream(quality, *args):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("simulated crash in the stream")
+        yield time.time(), b"after the crash"
+        time.sleep(10)
+    real_sleep, real_jpeg = time.sleep, receiver.jpeg_frames
+    receiver.jpeg_frames = flaky_stream
+    receiver.ERROR_LOG = os.path.join(os.environ.get("TEMP", "."), "feed_errors_test.log")
+    if os.path.exists(receiver.ERROR_LOG):
+        os.remove(receiver.ERROR_LOG)
+    try:
+        feed = receiver.FrameFeed()
+        item = feed.get(-1, timeout=5)
+        assert item is not None and item[2] == b"after the crash", "the reader must reconnect after an error"
+        assert len(calls) >= 2 and "simulated crash" in open(receiver.ERROR_LOG, encoding="utf-8").read()
+    finally:
+        receiver.jpeg_frames = real_jpeg
+    print("reader survives errors ok")
+
+
 if __name__ == "__main__":
     test()
+    test_reader_survives_errors()

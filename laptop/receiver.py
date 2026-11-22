@@ -81,6 +81,20 @@ def _read_exact(stream, n):
     return buf
 
 
+ERROR_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "captures", "feed_errors.log")
+
+
+def log_error(where, exc):
+    """Record an unexpected error from the video reader (captures/feed_errors.log) instead of letting a thread die silently."""
+    try:
+        os.makedirs(os.path.dirname(ERROR_LOG), exist_ok=True)
+        with open(ERROR_LOG, "a", encoding="utf-8") as f:
+            import traceback
+            f.write(f"{time.strftime('%H:%M:%S')} {where}: {exc!r}\n{traceback.format_exc()}\n")
+    except OSError:
+        pass
+
+
 META_FLAG = 0x80000000   # set in a packet's length when it carries text from turretd (on QNX) instead of a JPEG
 MAX_PACKET = 8 * 1024 * 1024
 
@@ -145,7 +159,10 @@ def jpeg_frames(quality=QUALITY, on_meta=None, on_proc=None):
                     break
                 if is_meta:
                     if on_meta:
-                        on_meta(bytes(body).decode(errors="replace"))
+                        try:
+                            on_meta(bytes(body).decode(errors="replace"))
+                        except Exception as e:          # a bad status line must never take the video down
+                            log_error("meta handler", e)
                     continue
                 yield time.time(), bytes(body)
         finally:
@@ -284,13 +301,20 @@ class FrameFeed:
         return self.meta if (self.meta and time.time() - self.meta_at < max_age) else None
 
     def _run(self, quality):
-        for ts, jpg in jpeg_frames(quality, self._on_meta, self._on_proc):
-            with self._cv:
-                if self._seq != self._consumed:     # the previous frame was never picked up
-                    self.dropped += 1
-                self._seq += 1
-                self._latest = (ts, jpg)
-                self._cv.notify_all()
+        while True:                                  # whatever goes wrong, the reader keeps going: log it and reconnect
+            try:
+                for ts, jpg in jpeg_frames(quality, self._on_meta, self._on_proc):
+                    with self._cv:
+                        if self._seq != self._consumed:     # the previous frame was never picked up
+                            self.dropped += 1
+                        self._seq += 1
+                        self._latest = (ts, jpg)
+                        self._cv.notify_all()
+                return                               # the stream ended by itself (real streams never do; test streams do)
+            except Exception as e:
+                log_error("video reader", e)
+                self._proc = None
+                time.sleep(1)
 
     def get(self, last_seq, timeout=2.0):
         """Block until a frame newer than last_seq exists; return (seq, arrival time, jpeg) or None."""
