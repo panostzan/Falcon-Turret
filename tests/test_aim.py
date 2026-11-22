@@ -180,5 +180,34 @@ def test():
     print("all aim tests passed")
 
 
+def test_tilt_window():
+    """A tilt window (140-180): bottom of the picture = 180, top = 140, middle = 160; the aim never leaves the window."""
+    g = SimGimbal(target=90)
+    a = Aimer(g, tilt_window=(140, 180))
+    a.sign["tilt"] = 1
+    assert a.tilt_center == 160 and a.span["tilt"] == 40
+    for ey, expect in ((1.0, 180), (-1.0, 140), (0.0, 160), (0.5, 170)):
+        a.reset()
+        a.update(0.0, ey)
+        assert abs(g.tilt - expect) <= 1.0, (ey, g.tilt, expect)
+    for ey in (-5.0, 5.0, 0.3, -0.7):                      # even a wild reading stays inside the window
+        a.reset()
+        a.update(0.0, ey)
+        assert 140 <= g.tilt <= 180, g.tilt
+    f = Aimer(g, mode="follow", tilt_window=(140, 180))
+    for _ in range(300):
+        f.update(0.0, 1.0)                                 # follow mode pushes down for a long time: it stops at 180
+    assert g.tilt == 180, g.tilt
+    for _ in range(300):
+        f.update(0.0, -1.0)
+    assert g.tilt == 140, g.tilt
+    a.home()
+    assert g.tilt == 160 and g.pan == 90, (g.pan, g.tilt)
+    full = Aimer(SimGimbal(target=90))                     # without a window nothing changes: the whole 90-180 range
+    assert full.tilt_center == 135 and full.tilt_clamp == (90, 180)
+    print("tilt window ok")
+
+
 if __name__ == "__main__":
     test()
+    test_tilt_window()

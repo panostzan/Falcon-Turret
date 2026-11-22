@@ -44,8 +44,16 @@ class Aimer:
     """
 
     def __init__(self, gimbal, mode="map", gain=(0.2, 0.2), deadband=1.0, max_step=8.0, smooth=0.35, fast_ramp=12.0,
-                 map_start=2.0, map_stop=0.6, span=(PAN_RANGE[1] - PAN_RANGE[0], TILT_RANGE[1] - TILT_RANGE[0])):
+                 map_start=2.0, map_stop=0.6, span=(PAN_RANGE[1] - PAN_RANGE[0], TILT_RANGE[1] - TILT_RANGE[0]),
+                 tilt_window=None):
+        """tilt_window=(lo, hi): the tilt servo's usable travel when the whole range does not fit the mechanics. The
+        picture's height maps onto just this window, its middle is the tilt 'center', and the aim never leaves it."""
         self.gimbal = gimbal
+        lo, hi = tilt_window if tilt_window else TILT_RANGE
+        self.tilt_clamp = (lo, hi)
+        self.tilt_center = (lo + hi) / 2 if tilt_window else CENTER[1]
+        if tilt_window:
+            span = (span[0], hi - lo)
         self.mode = mode
         self.gain = {"pan": gain[0], "tilt": gain[1]}
         self.sign = {"pan": 1, "tilt": 1}
@@ -77,7 +85,7 @@ class Aimer:
 
     def _map(self, ex, ey):
         goal = (CENTER[0] + self.sign["pan"] * ex * self.span["pan"] / 2,
-                CENTER[1] + self.sign["tilt"] * ey * self.span["tilt"] / 2)
+                self.tilt_center + self.sign["tilt"] * ey * self.span["tilt"] / 2)
         if self._goal is None:
             self._goal = goal
         else:
@@ -86,7 +94,7 @@ class Aimer:
                 a * g + (1 - a) * old
                 for g, old, a in ((g, old, min(1.0, self.smooth + (1 - self.smooth) * abs(g - old) / self.fast_ramp))
                                   for g, old in zip(goal, self._goal)))
-        pan, tilt = (clamp(self._goal[0], PAN_RANGE), clamp(self._goal[1], TILT_RANGE))
+        pan, tilt = (clamp(self._goal[0], PAN_RANGE), clamp(self._goal[1], self.tilt_clamp))
         # only command an axis once it is off by more than the deadband, so a still target means a still servo
         new_pan = pan if self._gate("pan", abs(pan - self.gimbal.pan)) else None
         new_tilt = tilt if self._gate("tilt", abs(tilt - self.gimbal.tilt)) else None
@@ -112,8 +120,12 @@ class Aimer:
         step_pan, step_tilt = self._follow_step("pan", ex, H_FOV), self._follow_step("tilt", ey, V_FOV)
         self.settled = step_pan == 0 and step_tilt == 0
         pan = clamp(self.gimbal.pan + step_pan, PAN_RANGE)
-        tilt = clamp(self.gimbal.tilt + step_tilt, TILT_RANGE)
+        tilt = clamp(self.gimbal.tilt + step_tilt, self.tilt_clamp)
         return self.gimbal.move_to(pan=pan, tilt=tilt)
+
+    def home(self):
+        """Go to the middle of the pan range and the middle of the tilt window."""
+        return self.gimbal.move_to(pan=CENTER[0], tilt=self.tilt_center)
 
     def flip(self, axis):
         self.sign[axis] *= -1

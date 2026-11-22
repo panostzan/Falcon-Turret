@@ -48,7 +48,11 @@ latest = {"jpg": None, "seq": 0, "state": {"connected": False, "fps": 0, "kb": 0
 tracker = ColorTracker()
 # This turret's servo directions (+1 = angle grows as the target goes right / down in the picture). Tilt is -1: tested
 # on the real turret, the other way pointed the wrong direction. The dashboard's Flip buttons change these live.
-DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
+# The tilt servo's usable travel (degrees). The picture height maps onto it: bottom of the picture = the high end (180), top = the low
+# end (140), middle = 160. Override with TILT_WINDOW="140,180"; "full" uses the whole 90-180 range and the older sign.
+_tw = os.environ.get("TILT_WINDOW", "140,180")
+TILT_WINDOW = None if _tw == "full" else tuple(int(v) for v in _tw.split(","))
+DEFAULT_SIGNS = {"pan": 1, "tilt": 1 if TILT_WINDOW else -1}
 view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False, "smooth": True, "depthcheck": False, "cutout": False, "fadestale": False, "qnx": True}   # flip the picture so it matches the real world (set from the dashboard)
 cfg = {"lead_ms": 0, "min_conf": 80, "cut": 15}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
                                      # to about the measured camera-to-servo delay, using the dashboard slider)
@@ -90,7 +94,9 @@ def set_tracking(on):
             return None
         try:
             if ctl["aimer"] is None:
-                ctl["aimer"] = Aimer(AsyncGimbal(GIMBAL_PORT))
+                ctl["aimer"] = Aimer(AsyncGimbal(GIMBAL_PORT), tilt_window=TILT_WINDOW)
+                if TILT_WINDOW:
+                    engage.scan_tilt = ctl["aimer"].tilt_center
                 ctl["aimer"].sign.update(DEFAULT_SIGNS)
             ctl["angles"] = ctl["aimer"].gimbal.status()
             ctl["tracking"], ctl["error"] = True, None
@@ -523,7 +529,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(b"{}")
         if url.path == "/center" and ctl["aimer"]:
             with ctl_lock:
-                ctl["angles"] = ctl["aimer"].gimbal.center()
+                ctl["angles"] = ctl["aimer"].home()
             return self._send(b"{}")
         self._send(b"{}", code=404)
 

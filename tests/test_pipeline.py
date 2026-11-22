@@ -29,7 +29,7 @@ def run(cx, cy, mirror=True, frames=25):
     gimbal = AsyncGimbal(link=esp)
     app.tracker.use_preset("teal")
     app.predictor.reset()
-    app.ctl.update(aimer=Aimer(gimbal), tracking=True, error=None)
+    app.ctl.update(aimer=Aimer(gimbal, tilt_window=app.TILT_WINDOW), tracking=True, error=None)
     app.ctl["aimer"].sign.update(app.DEFAULT_SIGNS)
     app.view.update(mirror=mirror, vflip=False, mask=False)
     jpg, times = frame_with_box(cx, cy), []
@@ -49,7 +49,7 @@ def run_moving(lead_ms, frames=40):
     gimbal = AsyncGimbal(link=esp)
     app.tracker.use_preset("teal")
     app.predictor.reset()
-    app.ctl.update(aimer=Aimer(gimbal), tracking=True, error=None)
+    app.ctl.update(aimer=Aimer(gimbal, tilt_window=app.TILT_WINDOW), tracking=True, error=None)
     app.ctl["aimer"].sign.update(app.DEFAULT_SIGNS)
     app.view.update(mirror=False, vflip=False, mask=False)
     app.cfg["lead_ms"] = lead_ms
@@ -78,7 +78,7 @@ def test_engagement():
     gimbal = AsyncGimbal(link=esp)
     app.tracker.use_preset("teal")
     app.predictor.reset()
-    app.ctl.update(aimer=Aimer(gimbal), tracking=True, error=None)
+    app.ctl.update(aimer=Aimer(gimbal, tilt_window=app.TILT_WINDOW), tracking=True, error=None)
     app.ctl["aimer"].sign.update(app.DEFAULT_SIGNS)
     app.view.update(mirror=False, vflip=False, mask=False)
     app.cfg["lead_ms"] = 250
@@ -132,16 +132,16 @@ def test():
     test_moving()
     # mirrored picture: a box at source x=480 appears at x=160 (left of center) -> pan below 90
     pan, tilt, ms, _ = run(480, 360)
-    assert abs(pan - 45) <= 3 and abs(tilt - 112) <= 3, (pan, tilt)
+    assert abs(pan - 45) <= 3 and abs(tilt - 170) <= 3, (pan, tilt)
     # box on the other side
     pan, tilt, ms2, _ = run(160, 120)
-    assert abs(pan - 135) <= 3 and abs(tilt - 158) <= 3, (pan, tilt)
+    assert abs(pan - 135) <= 3 and abs(tilt - 150) <= 3, (pan, tilt)
     # no mirror: x maps straight through
     pan, tilt, _, _ = run(480, 240, mirror=False)
-    assert abs(pan - 135) <= 3 and abs(tilt - 135) <= 3, (pan, tilt)
+    assert abs(pan - 135) <= 3 and abs(tilt - 160) <= 3, (pan, tilt)
     # centered box -> straight ahead
     pan, tilt, _, _ = run(320, 240, mirror=False)
-    assert abs(pan - 90) <= 2 and abs(tilt - 135) <= 2, (pan, tilt)
+    assert abs(pan - 90) <= 2 and abs(tilt - 160) <= 2, (pan, tilt)
     # the color-match view tints the accepted pixels
     app.view.update(mask=True)
     app.tracker.use_preset("teal")
