@@ -14,6 +14,7 @@ import roof as R   # noqa: E402
 from engage import Engagement   # noqa: E402
 
 R.ROOF_MOVE_S = 0.9      # the checks below wait fixed times: a roof that moves at this speed keeps them short (the real default is slower)
+R.ROOF_OPEN_S = None      # these timings assume one roof speed for both directions
 
 
 class FakeGimbal:

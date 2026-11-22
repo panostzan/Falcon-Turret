@@ -26,7 +26,13 @@ LIFT_DOWN, LIFT_UP = 0, 150            # the platform is the lift servo (channel
 TRAVEL_S = 0.5                         # how long the platform takes to get there (it is sent straight to its angle)
 ROOF_MOVE_S = float(os.environ.get("TURRET_ROOF_SECONDS", 1.4))   # the roof is walked to its angle over this long (gentler on the servo),
                                                                   # with a soft start and stop. Raise it to go slower.
+ROOF_OPEN_S = float(os.environ.get("TURRET_ROOF_OPEN_SECONDS", 0.4))   # opening is quick; closing keeps the gentle ROOF_MOVE_S. None = same as ROOF_MOVE_S
 STAGGER_S = float(os.environ.get("TURRET_ROOF_STAGGER", 0.25))   # delay between the two servos
+
+def _open_s():
+    return ROOF_OPEN_S if ROOF_OPEN_S is not None else ROOF_MOVE_S
+
+
 WAKE_S = 0.3                           # the target must be seen this long (with enough confidence) to open the roof
 SLEEP_AFTER_S = 10.0                   # this long without the target and the roof closes
 BLINK_S = 0.3                          # a gap in sighting shorter than this does not break the run (one missed frame)
@@ -142,7 +148,8 @@ class Roof:
     # ---- sending: the platform goes straight to its angle, the roof is walked there ----
     def _send(self, cmd, now):
         if "aux" in cmd and self._aux is not None and cmd["aux"] != self._aux:
-            self._glide = (self._aux, cmd["aux"], now, max(0.05, ROOF_MOVE_S))      # starts from wherever it last was, even mid-move
+            secs = _open_s() if cmd["aux"] == ROOF_OPEN else ROOF_MOVE_S
+            self._glide = (self._aux, cmd["aux"], now, max(0.05, secs))      # starts from wherever it last was, even mid-move
         else:
             self.move(**cmd)
             if "aux" in cmd:
@@ -166,7 +173,7 @@ class Roof:
         self.state = OPENING
         self._glide = None
         self._plan = [(now, {"aux": ROOF_OPEN}), (now + STAGGER_S, {"lift": LIFT_UP})]    # roof first, platform after
-        self._done_at = now + max(STAGGER_S + TRAVEL_S, ROOF_MOVE_S)
+        self._done_at = now + max(STAGGER_S + TRAVEL_S, _open_s())
 
     def _begin_close(self, now):
         self.state = CLOSING

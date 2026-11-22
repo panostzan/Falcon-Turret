@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import roof as R   # noqa: E402
 
 R.ROOF_MOVE_S = 0.45               # the older checks below use a quick roof so their timings stay short; the gentle-roof checks set the real one
+R.ROOF_OPEN_S = None      # these timings assume one roof speed for both directions
 
 
 def merged(log):
@@ -225,5 +226,10 @@ aux = [t for t, c in r.log if "aux" in c]
 check(1.5 <= aux[-1] - aux[0] <= 2.0, "the time can be set: 1.8 s gives about 1.8 s")
 R.ROOF_MOVE_S = 1.4
 check(R.ROOF_MOVE_S == 1.4 and R.ROOF_OPEN == 20, "defaults: 1.4 s, opens to 20")
+check(R.ROOF_MOVE_S == 1.4 and R.ROOF_OPEN_S == 0.4, "defaults: closes over 1.4 s, opens over 0.4 s")
+R.ROOF_OPEN_S = 0.4
+check(R._open_s() == 0.4, "opening uses its own quick time")
+R.ROOF_OPEN_S = None
+check(R._open_s() == R.ROOF_MOVE_S, "no separate opening time: same as closing")
 
 print(f"ok: {checks} roof checks passed")
