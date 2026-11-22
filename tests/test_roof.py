@@ -226,6 +226,7 @@ aux = [t for t, c in r.log if "aux" in c]
 check(1.5 <= aux[-1] - aux[0] <= 2.0, "the time can be set: 1.8 s gives about 1.8 s")
 R.ROOF_MOVE_S = 1.4
 check(R.ROOF_MOVE_S == 1.4 and R.ROOF_OPEN == 20, "defaults: 1.4 s, opens to 20")
+R.ROOF_OPEN_S = float(__import__("os").environ.get("TURRET_ROOF_OPEN_SECONDS", 0.4))   # back to the shipped default
 check(R.ROOF_MOVE_S == 1.4 and R.ROOF_OPEN_S == 0.4, "defaults: closes over 1.4 s, opens over 0.4 s")
 R.ROOF_OPEN_S = 0.4
 check(R._open_s() == 0.4, "opening uses its own quick time")
