@@ -42,6 +42,7 @@ def main():
     cal.add_argument("--square-m", type=float, required=True)
     cal.add_argument("--baseline-m", type=float)
     cal.add_argument("--static-pairs", action="store_true")
+    cal.add_argument("--max-skew-ms", type=float, default=15)
     cal.add_argument("--output", required=True)
     for name in ("demo", "replay", "live"):
         p = sub.add_parser(name)
@@ -61,7 +62,7 @@ def main():
     args = parser.parse_args()
     if args.command == "calibrate":
         calibration, report = calibrate_manifest(args.manifest, tuple(args.board), args.square_m,
-            static_pairs=args.static_pairs, expected_baseline_m=args.baseline_m)
+            static_pairs=args.static_pairs, max_skew_s=args.max_skew_ms/1000, expected_baseline_m=args.baseline_m)
         calibration.save(args.output)
         Path(args.output+".json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(json.dumps(report, indent=2))
