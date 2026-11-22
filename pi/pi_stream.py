@@ -24,6 +24,7 @@ import threading
 import time
 
 from shrink import shrink_planes      # lives next to this file on the Pi (~/bin/shrink.py)
+import sysmon                          # ~/bin/sysmon.py: live QNX stats and the real-time demo switches
 
 UNIT = "5"
 FPS = sys.argv[1] if len(sys.argv) > 1 else "30"
@@ -89,6 +90,7 @@ class Brain:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.ok = True
         self.client = None                  # the laptop's address, learned from its first UDP datagram
+        self.monitor = sysmon.Monitor(self._push_udp)    # before any thread starts: the UDP thread uses it from its first datagram
         self.udp = None
         try:
             self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -97,7 +99,7 @@ class Brain:
             threading.Thread(target=self._udp_control, daemon=True).start()
         except OSError:
             self.udp = None                 # no UDP channel: everything still works through the SSH stream
-        for target in (self._write_frames, self._read_lines, self._forward_control):
+        for target in (self._write_frames, self._read_lines, self._forward_control, self.monitor.run):
             threading.Thread(target=target, daemon=True).start()
 
     def _udp_control(self):
@@ -115,7 +117,7 @@ class Brain:
                         self.udp.sendto((f"P {line[5:]} {time.monotonic() * 1000:.3f}").encode(), addr)
                     except OSError:
                         pass
-                elif line:
+                elif line and not self.monitor.handle(line):          # stress/rt lines belong to sysmon, the rest to turretd
                     try:
                         self.sock.sendto(line.encode() + b"\n", CONTROL)
                     except OSError:
@@ -179,6 +181,8 @@ class Brain:
                 if line.startswith(b"ping "):       # timing probe through the SSH stream: answered inside the stream
                     with self._cv:
                         self._out.append("P " + line[5:].decode(errors="replace").strip() + f" {time.monotonic() * 1000:.3f}")
+                    continue
+                if self.monitor.handle(line.decode(errors="replace")):
                     continue
                 try:
                     self.sock.sendto(line + b"\n", CONTROL)
@@ -299,6 +303,9 @@ def camera_status(brain):
 
 
 def main():
+    # This program (video, control, monitoring) runs at priority 20: above ordinary programs (10), below the tracker (30). Under an
+    # overload it stays responsive, so the dashboard can still talk to the Pi; the demo then isolates what the tracker's priority does.
+    subprocess.call(["slay", "-Q", "-P", "20", str(os.getpid())], stderr=subprocess.DEVNULL)
     subprocess.call(["slay", "-f", "camera_example4_record"], stderr=subprocess.DEVNULL)
     for stale in glob.glob(DIR + "/VID_*.ucv"):
         os.remove(stale)

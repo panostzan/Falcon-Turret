@@ -1,0 +1,25 @@
+Computing times...[H[2J[H4 online CPUs; 50 processes; 326 threads;[K
+CPU states: 32.4% user, 4.5% kernel[K
+Memory: 8128M total, 7348M avail, page size 4K[K
+[K
+      PID   TID PRI STATE    HH:MM:SS    CPU  COMMAND             [K
+   847899    12  63 Rdy      00:14:48  15.18% drm-rpi5            [K
+   847899    24 254 Intr     00:08:47   9.01% drm-rpi5            [K
+        1     6 255 Intr     00:02:48   2.81% kernel              [K
+  2814001     1  10 SigW     00:00:36   2.06% turretd             [K
+  2781232     1  10 NSlp     00:00:57   1.75% python3             [K
+        1     5 255 Intr     00:00:49   0.83% kernel              [K
+  1032228     7  29 Run      00:00:27   0.82% sensor              [K
+   143372    44  21 Sem      00:00:38   0.50% io-sock             [K
+        1     7 255 Intr     00:00:25   0.49% kernel              [K
+  1032228    16  10 CdV      00:00:06   0.38% sensor              [K
+[K
+  Idle:      Curr     Min     Max     Avg [K
+CPU  0:     19.5%     19%     19%     19% [K
+CPU  1:     55.9%     55%     55%     55% [K
+CPU  2:     86.5%     86%     86%     86% [K
+CPU  3:     89.8%     89%     89%     89% [K
+Mem Avail:          7348M   7348M   7348M[K
+Processes:            50      50      50[K
+Threads:             326     326     326[K
+[K

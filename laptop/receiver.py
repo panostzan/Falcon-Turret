@@ -1,4 +1,5 @@
 """Receives the Pi's JPEG frame stream ([u32 length][JPEG]) over one persistent SSH connection."""
+import json
 import os
 import re
 import socket
@@ -125,6 +126,23 @@ def parse_stamp(text):
     return None
 
 
+def parse_system(text):
+    """The Pi's system report ('Q {json}': CPU, memory, busiest programs with their priorities, stress/real-time switches), or None."""
+    for line in text.splitlines():
+        if line.startswith("Q {"):
+            try:
+                d = json.loads(line[2:])
+                return d if isinstance(d, dict) else None
+            except ValueError:
+                return None
+    return None
+
+
+def percentile(values, q):
+    values = sorted(values)
+    return values[min(len(values) - 1, int(len(values) * q))] if values else None
+
+
 def parse_video_stats(text):
     """The Pi's own video measurements ('V <pictures/s> <KB per picture> <encode ms> <CPU %>'), or None."""
     for line in text.splitlines():
@@ -223,6 +241,8 @@ class FrameFeed:
         self._pings = {}                             # probe id -> time sent
         self.camera, self.camera_at = None, 0.0       # the Pi's report on its camera (None until it says something)
         self.pi_video, self.pi_video_at = None, 0.0   # the Pi's own video measurements (rate, size, encode time, CPU)
+        self.pi_system, self.pi_system_at = None, 0.0  # the Pi's system report (CPU, memory, programs, priorities)
+        self.proc_log = deque(maxlen=900)             # (arrival time, tracker processing time in ms) per answer: the control loop's timing
         self._arrivals = deque(maxlen=600)            # (arrival time, bytes, delay in ms or None) of each picture at THIS end of the Wi-Fi
         self._offsets = deque(maxlen=40)              # (round trip s, laptop clock minus Pi clock s) from the UDP pings
         self._next_stamp = None                       # the Pi clock stamp of the picture about to arrive
@@ -243,6 +263,7 @@ class FrameFeed:
         # an answer counts only if it is newer than the one we have: the same line arrives twice (UDP first, then the stream)
         if status and (self.meta is None or status["t_ms"] >= self.meta["t_ms"]):
             self.meta, self.meta_at = status, time.time()
+            self.proc_log.append((self.meta_at, status["proc_us"] / 1000.0))
             with self._meta_cv:
                 self._meta_cv.notify_all()
         if events:
@@ -254,6 +275,9 @@ class FrameFeed:
         pv = parse_video_stats(text)
         if pv:
             self.pi_video, self.pi_video_at = pv, time.time()
+        ps = parse_system(text)
+        if ps:
+            self.pi_system, self.pi_system_at = ps, time.time()
         now = time.time()
         stamp = parse_stamp(text)
         if stamp is not None:
@@ -300,6 +324,14 @@ class FrameFeed:
             return None
         best = min(self._offsets)                                    # lowest round trip = most trustworthy offset
         return (arrival - (best[1] + stamp / 1000.0)) * 1000.0
+
+    def tracker_timing(self, window=10.0):
+        """How long the QNX tracker took per picture over the last `window` seconds (ms): median, 95th percentile, worst, and the count."""
+        now = time.time()
+        vals = [v for t, v in list(self.proc_log) if now - t <= window]
+        if len(vals) < 3:
+            return None
+        return {"p50": round(percentile(vals, 0.5), 2), "p95": round(percentile(vals, 0.95), 2), "max": round(max(vals), 2), "n": len(vals)}
 
     def wire_stats(self, window=30.0):
         """What actually arrived over the Wi-Fi in the last `window` seconds: pictures per second, KB per picture, and the gaps
@@ -407,6 +439,8 @@ class CameraFeed:
         self.meta, self.events = None, []             # no QNX behind a laptop webcam
         self.camera, self.camera_at = None, 0.0
         self.pi_video, self.pi_video_at = None, 0.0
+        self.pi_system, self.pi_system_at = None, 0.0
+        self.proc_log = deque(maxlen=10)
         self._cv = threading.Condition()
         self._latest, self._seq, self._consumed = None, 0, 0
         threading.Thread(target=self._run, daemon=True).start()
@@ -452,6 +486,9 @@ class CameraFeed:
         return {}
 
     def wire_stats(self, window=30.0):
+        return None
+
+    def tracker_timing(self, window=10.0):
         return None
 
     def wait_meta(self, after_t_ms, timeout=0.5):

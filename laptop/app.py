@@ -21,6 +21,9 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import ease                           # noqa: E402
+import syscheck                      # noqa: E402
+from gimbal import Gimbal            # noqa: E402
 from aim import Aimer              # noqa: E402
 from engage import Engagement     # noqa: E402
 from gimbal import TILT_RANGE, AsyncGimbal     # noqa: E402
@@ -39,6 +42,7 @@ CAMERA = (int(sys.argv[sys.argv.index("--camera") + 1]) if "--camera" in sys.arg
 CLASSIC = open(os.path.join(HERE, "dashboard.html"), encoding="utf-8").read().encode()   # the previous dashboard, at /classic
 # The pages and assets of the current dashboard (laptop/ui/). Only these names are served, so no other file can be read.
 UI_FILES = {"/": ("live.html", "text/html; charset=utf-8"), "/diagnostics": ("diagnostics.html", "text/html; charset=utf-8"),
+            "/qnx": ("qnx.html", "text/html; charset=utf-8"), "/check": ("check.html", "text/html; charset=utf-8"),
             "/ui.css": ("ui.css", "text/css; charset=utf-8"), "/ui.js": ("ui.js", "application/javascript; charset=utf-8")}
 STARTED = time.time()
 BOOT = time.time()                  # lets the page detect a server restart and reconnect its video
@@ -110,6 +114,24 @@ def qnx_aim_step(m, aimer):
     return angles
 
 
+# Smooth motion: the servos glide (speed up, cruise, brake) instead of jumping. TURRET_EASE=off turns it off; the two numbers can be tuned.
+EASE = None if os.environ.get("TURRET_EASE", "on").lower() == "off" else {
+    "vmax": float(os.environ.get("TURRET_VMAX", ease.DEFAULT_VMAX)), "accel": float(os.environ.get("TURRET_ACCEL", ease.DEFAULT_ACCEL))}
+
+
+def ease_loop():
+    """About 50 times a second: one small step of every glide in progress (see aim.Aimer.tick)."""
+    while EASE:
+        time.sleep(0.02)
+        try:
+            with ctl_lock:
+                if ctl["tracking"] and ctl["aimer"]:
+                    ctl["aimer"].tick(time.time())
+        except Exception as e:
+            with ctl_lock:
+                ctl["tracking"], ctl["error"] = False, f"gimbal: {e}"
+
+
 def qnx_aim_loop():
     """Aims the moment the Pi's answer arrives, on its own thread. The picture loop keeps drawing, but it no longer waits for
     a video frame (which can be 100 ms to seconds late on this Wi-Fi) before the gimbal is told to move."""
@@ -147,7 +169,7 @@ def set_tracking(on):
             return None
         try:
             if ctl["aimer"] is None:
-                ctl["aimer"] = Aimer(AsyncGimbal(GIMBAL_PORT, tilt_limits=TILT_WINDOW or TILT_RANGE), tilt_window=TILT_WINDOW, tilt_enabled=TILT_ON)
+                ctl["aimer"] = Aimer(AsyncGimbal(GIMBAL_PORT, tilt_limits=TILT_WINDOW or TILT_RANGE), tilt_window=TILT_WINDOW, tilt_enabled=TILT_ON, ease=EASE)
                 if TILT_WINDOW:
                     engage.scan_tilt = ctl["aimer"].tilt_center
                 ctl["aimer"].sign.update(DEFAULT_SIGNS)
@@ -226,6 +248,43 @@ def qnx_summary():
         age_s = time.time() - f.meta_at                   # both clocks below are the Pi's, so the difference is exact
         out["events"] = [[round(max(0.0, (m["t_ms"] - t) / 1000.0) + age_s, 1), text] for t, text in f.events[-8:]]
     return out
+
+
+stress = {"on": False, "since": 0.0, "baseline": None, "baseline_fps": None}     # the real-time demo (CPU hogs on the Pi)
+STRESS_RENEW_S, STRESS_MAX_S = 20.0, 180.0
+
+
+def set_stress(on):
+    """Start or stop the overload on the Pi. On start, remember how the tracker and the video were doing while calm, to compare."""
+    f = feed_ref["feed"]
+    if on and not stress["on"]:
+        stress.update(baseline=f.tracker_timing(10.0) if f else None, baseline_fps=(pi_video() or {}).get("fps"))
+        stress.update(on=True, since=time.time())
+    elif not on:
+        stress["on"] = False
+    send_pi(f"stress {'on' if on else 'off'}")
+
+
+def stress_keepalive():
+    """While the demo runs, keep telling the Pi (its own safety timer stops it after 90 s without this); end it after 3 minutes."""
+    while True:
+        time.sleep(STRESS_RENEW_S)
+        if stress["on"]:
+            if time.time() - stress["since"] > STRESS_MAX_S:
+                set_stress(False)
+            else:
+                send_pi("stress on")
+
+
+def qnx_panel():
+    """Everything the QNX page shows: the Pi's own report, the tracker's timing, the control-channel round trip, and the demo."""
+    f = feed_ref["feed"]
+    sysrep = getattr(f, "pi_system", None) if f else None
+    fresh = bool(sysrep and time.time() - getattr(f, "pi_system_at", 0.0) < 5.0)
+    return {"system": sysrep if fresh else None, "timing": f.tracker_timing(10.0) if f else None,
+            "rtt": f.rtt() if (f and hasattr(f, "rtt")) else {}, "video": pi_video(), "qnx": qnx_summary(),
+            "stress": {"on": stress["on"], "seconds": round(time.time() - stress["since"]) if stress["on"] else 0,
+                       "baseline": stress["baseline"], "baseline_fps": stress["baseline_fps"]}}
 
 
 _track_log = {"found": None, "qnx": None, "t": 0.0}
@@ -467,6 +526,16 @@ def capture_loop():
 _cpu_mark = {"wall": time.time(), "cpu": time.process_time()}
 
 
+def run_syscheck(wiggle):
+    """The one-click system check (see syscheck.py), wired to this server's real parts."""
+    env = {"feed": lambda: feed_ref["feed"], "camera": camera_summary, "frame_age": lambda: time.time() - last_frame_t[0],
+           "qnx": qnx_summary, "tracking": lambda: bool(ctl["tracking"] and ctl["aimer"]),
+           "held_gimbal": lambda: ctl["aimer"].gimbal,
+           "open_gimbal": lambda: Gimbal(GIMBAL_PORT, tilt_limits=TILT_WINDOW or TILT_RANGE),
+           "laptop": system_stats, "depth": lambda: {"on": view["depth"], "available": bool(depth_state["net"] and getattr(depth_state["net"], "available", True))}}
+    return syscheck.run(env, wiggle=wiggle)
+
+
 def system_stats():
     """Memory and CPU use for the diagnostics page (Windows). Any value that cannot be read is None."""
     out = {"uptime_s": round(time.time() - STARTED), "ram_free_gb": None, "ram_total_gb": None, "process_mb": None,
@@ -526,6 +595,8 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/state":
             self._send(json.dumps(dict(latest["state"], frame_age=round(time.time() - last_frame_t[0], 1), camera=camera_summary(),
                                        video_wire=video_wire(), pi_video=pi_video())).encode())
+        elif self.path == "/qnx.json":
+            self._send(json.dumps(qnx_panel()).encode())
         elif self.path == "/telemetry":
             snap, now = telemetry.snapshot(), time.time()
             snap["events"] = [[round(now - t, 1), text] for t, text in list(engage.events)[-14:]]
@@ -598,6 +669,14 @@ class Handler(BaseHTTPRequestHandler):
             qnx_sync["arm_cmd"] = time.time()
             send_pi(f"arm {1 if on else 0}")
             return self._send(b"{}")
+        if url.path == "/syscheck":
+            return self._send(json.dumps(run_syscheck(q.get("wiggle", ["0"])[0] == "1")).encode())
+        if url.path == "/stress":
+            set_stress(q.get("on", ["0"])[0] == "1")
+            return self._send(b"{}")
+        if url.path == "/rt":
+            send_pi(f"rt {'on' if q.get('on', ['1'])[0] == '1' else 'off'}")
+            return self._send(b"{}")
         if url.path == "/autoscan":
             engage.auto_scan = q.get("on", ["0"])[0] == "1"
             send_pi(f"auto_scan {1 if engage.auto_scan else 0}")
@@ -634,5 +713,7 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     threading.Thread(target=capture_loop, daemon=True).start()
     threading.Thread(target=qnx_aim_loop, daemon=True).start()       # aims as soon as the Pi's answer arrives
+    threading.Thread(target=stress_keepalive, daemon=True).start()
+    threading.Thread(target=ease_loop, daemon=True).start()
     print("Turret: http://localhost:8000", flush=True)
     ThreadingHTTPServer(("127.0.0.1", 8000), Handler).serve_forever()
