@@ -8,6 +8,7 @@
 //   C          centre: pan 90, tilt 22, lift 90 (energises those three; aux is NOT touched, it moves only on its own A command)
 //   S          status only
 //   O          release: every servo goes limp (no pulses)
+//   X          fire indicator: the board LED and FIRE_PIN (D12) go high for 250 ms. Moves nothing; wire an LED (with a resistor) to D12 if wanted
 //   F<kHz>     trim the PCA9685's oscillator, 20000-30000 (default 25000), if the angles read a few degrees off
 //   R          distance in mm: always "R-1" here (no sensor wired for now)      I   sensor model: "I none"
 //
@@ -28,6 +29,9 @@ const uint8_t CH_PAN = 0, CH_TILT = 1, CH_LIFT = 2, CH_AUX = 3;
 const int PULSE_MIN_US = 500, PULSE_MAX_US = 2400;       // same as ESP32Servo attach(pin, 500, 2400)
 const int HOME_PAN = 90, HOME_TILT = 22, HOME_LIFT = 90, HOME_AUX = 90;
 const int AXES = 4;
+const uint8_t FIRE_PIN = 12;                              // a pin you can wire an external LED to; the board LED shows the same pulse
+const uint32_t FIRE_PULSE_MS = 250;
+uint32_t fireUntil = 0;                                   // millis() when the fire pulse ends (0 = no pulse)
 const uint32_t OSC_DEFAULT_HZ = 25000000;                // the PCA9685's internal oscillator, nominally 25 MHz
 
 Adafruit_PWMServoDriver pwm(PCA_ADDRESS);
@@ -66,6 +70,11 @@ String run(const char *cmd) {
     // status only
   } else if (strcmp(cmd, "O") == 0) {
     releaseAll();
+  } else if (strcmp(cmd, "X") == 0) {
+    digitalWrite(FIRE_PIN, HIGH);
+    digitalWrite(LED_BUILTIN, HIGH);
+    fireUntil = millis() + FIRE_PULSE_MS;
+    if (fireUntil == 0) fireUntil = 1;
   } else if (strcmp(cmd, "R") == 0) {
     return "R-1";
   } else if (strcmp(cmd, "I") == 0) {
@@ -94,6 +103,8 @@ String run(const char *cmd) {
 void setup() {
   Serial.begin(115200);              // never waits for a computer: the firmware runs on its own
   pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(FIRE_PIN, OUTPUT);
+  digitalWrite(FIRE_PIN, LOW);
   Wire.begin();
   Wire.setClock(400000);
   pwm.begin();
@@ -103,6 +114,11 @@ void setup() {
 }
 
 void loop() {
+  if (fireUntil && (int32_t)(millis() - fireUntil) >= 0) {   // the fire pulse is over
+    digitalWrite(FIRE_PIN, LOW);
+    digitalWrite(LED_BUILTIN, LOW);
+    fireUntil = 0;
+  }
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '\r') continue;

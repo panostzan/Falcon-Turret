@@ -72,6 +72,8 @@ static void handle_control(Brain *b, char *line)
     else if (sscanf(line, "track %d", &n) == 1) b->tracking = n != 0;
     else if (sscanf(line, "arm %d", &n) == 1) engage_arm(&b->engage, n, now_s());
     else if (sscanf(line, "auto_scan %d", &n) == 1) b->engage.auto_scan = n != 0;
+    else if (sscanf(line, "autofire %d", &n) == 1) b->engage.auto_fire = n != 0;
+    else if (strcmp(line, "fire") == 0) { engage_fire(&b->engage, now_s()); print_new_events(b); }
     else if (sscanf(line, "min_conf %d", &n) == 1) { if (n >= 50 && n <= 100) b->engage.cfg.min_confidence = n / 100.0; }
     else if (sscanf(line, "aim %d %lf", &n, &speed) == 2) { b->settled = n != 0; b->speed = speed; }
     else if (strcmp(line, "hb") == 0) {

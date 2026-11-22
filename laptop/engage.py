@@ -36,6 +36,7 @@ class Engagement:
         self.scan_range, self.scan_speed, self.scan_tilt = scan_range, scan_speed, scan_tilt
         self.armed = False
         self.auto_scan = False
+        self.auto_fire = True                     # shoot by itself on LOCK; False = only on a manual fire()
         self.shots = 0
         self.events = deque(maxlen=80)            # (time, text) newest last
         self.state = "IDLE"
@@ -61,6 +62,21 @@ class Engagement:
             self.events.append((ts, "ARMED" if on else "DISARMED"))
             if on:
                 self.shots = 0
+
+    def fire(self, ts):
+        """A manual shot (the operator's click). Allowed only when armed and tracking, outside the cooldown and under max_shots;
+        needs no lock. Returns None when it fired, else the reason it was refused (also logged)."""
+        reason = (None if self.armed else "not armed") or ("tracking off" if self.state == "IDLE" else None)             or ("cooldown" if ts < self._cooldown_until else None)             or ("shot limit" if self.shots >= self.max_shots else None)
+        if reason:
+            self.events.append((ts, f"FIRE refused: {reason}"))
+            return reason
+        self.emitter.fire(ts)
+        self.shots += 1
+        self.events.append((ts, f"FIRE #{self.shots} (manual)"))
+        self._cooldown_until = ts + self.cooldown_s
+        self._lock_since = None
+        self._to("COOLDOWN", ts)
+        return None
 
     def update(self, ts, tracking, found, settled, speed=0.0, confidence=1.0):
         """Call once per frame. Returns (fired, scan_goal): fired is True on the frame a shot is taken;
@@ -99,7 +115,7 @@ class Engagement:
                 if self._settled == 0 or speed > self.max_speed:
                     self._to("TRACK", ts, "lock broken")
                     self._lock_since = None
-                elif (self.armed and self.shots < self.max_shots and self._lock_since is not None
+                elif (self.armed and self.auto_fire and self.shots < self.max_shots and self._lock_since is not None
                       and ts - self._lock_since >= self.dwell_s):
                     self.emitter.fire(ts)
                     self.shots += 1

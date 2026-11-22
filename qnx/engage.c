@@ -36,6 +36,7 @@ void engage_init(Engage *e, const EngageConfig *cfg)
     memset(e, 0, sizeof *e);
     if (cfg) e->cfg = *cfg; else engage_defaults(&e->cfg);
     e->state = ENGAGE_IDLE;
+    e->auto_fire = 1;
     reset(e);
 }
 
@@ -68,6 +69,22 @@ static void scan_goal(Engage *e, double ts, ScanGoal *g)
     g->has_goal = 1;
     g->pan = e->cfg.scan_lo + (phase <= span ? phase : 2.0 * span - phase);
     g->tilt = e->cfg.scan_tilt;
+}
+
+FireResult engage_fire(Engage *e, double ts)
+{
+    if (!e->armed) { note(e, ts, "FIRE refused: not armed"); return FIRE_NOT_ARMED; }
+    if (e->state == ENGAGE_IDLE) { note(e, ts, "FIRE refused: tracking off"); return FIRE_NOT_TRACKING; }
+    if (ts < e->cooldown_until) { note(e, ts, "FIRE refused: cooldown"); return FIRE_COOLDOWN; }
+    if (e->shots >= e->cfg.max_shots) { note(e, ts, "FIRE refused: shot limit"); return FIRE_LIMIT; }
+    char text[40];
+    e->shots++;
+    snprintf(text, sizeof text, "FIRE #%d (manual)", e->shots);
+    note(e, ts, text);
+    e->cooldown_until = ts + e->cfg.cooldown_s;
+    e->have_lock_since = 0;
+    to_state(e, ENGAGE_COOLDOWN, ts, NULL);
+    return FIRE_OK;
 }
 
 int engage_update(Engage *e, double ts, int tracking, int found, int settled, double speed, double confidence,
@@ -112,7 +129,7 @@ int engage_update(Engage *e, double ts, int tracking, int found, int settled, do
             if (e->settled == 0 || speed > c->max_speed) {
                 to_state(e, ENGAGE_TRACK, ts, "lock broken");
                 e->have_lock_since = 0;
-            } else if (e->armed && e->shots < c->max_shots && e->have_lock_since && ts - e->lock_since >= c->dwell_s) {
+            } else if (e->armed && e->auto_fire && e->shots < c->max_shots && e->have_lock_since && ts - e->lock_since >= c->dwell_s) {
                 e->shots++;
                 fired = 1;
                 {

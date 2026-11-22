@@ -100,6 +100,32 @@ def test():
     assert min(g[0] for g in goals) < 60 and max(g[0] for g in goals) > 120, "should sweep the whole range"
     _, g = e.update(t, True, True, True)             # a target appears: scanning stops
     assert g is None
+
+    # manual fire (the operator's click)
+    e = Engagement()
+    assert e.fire(0.0) == "not armed" and e.shots == 0, "disarmed: refused"
+    e.arm(True, 0.0)
+    assert e.fire(0.0) == "tracking off" and e.shots == 0, "armed but tracking is off: refused"
+    e.update(0.1, True, False, False)                        # tracking on, no target (SEARCH)
+    assert e.fire(0.2) is None and e.shots == 1 and e.state == "COOLDOWN", "armed + tracking: fires, even without a lock"
+    assert e.fire(0.3) == "cooldown" and e.shots == 1, "no second shot inside the cooldown"
+    assert e.events[-1][1] == "FIRE refused: cooldown"
+    run(e, 3, found=False, t0=0.4)                           # cooldown passes
+    assert e.fire(5.0) is None and e.shots == 2
+    e.arm(False, 6.0)
+    assert e.fire(7.0) == "not armed", "disarming takes the trigger away at once"
+    e = Engagement(max_shots=2)
+    e.arm(True, 0.0)
+    e.update(0.0, True, False, False)
+    assert e.fire(0.1) is None and e.fire(3.0) is None and e.fire(6.0) == "shot limit" and e.shots == 2
+
+    # auto-fire off: armed and locked, but it only shoots when told to
+    e = Engagement()
+    e.auto_fire = False
+    e.arm(True, 0)
+    fired, t = run(e, 5)
+    assert fired == 0 and e.state == "LOCK" and e.shots == 0, "locked and armed, but no automatic shot"
+    assert e.fire(t) is None and e.shots == 1, "the click still fires"
     print("engagement tests passed")
 
 

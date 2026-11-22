@@ -137,6 +137,28 @@ send("min_conf 80")
 ok = wait_for(lambda: len([e for e in snapshot()[1] if "FIRE" in e]) > after, 6)
 check("required level back to 80%: fires again", ok)
 
+# manual fire: the operator's click
+def shots():
+    return len([e for e in snapshot()[1] if "FIRE #" in e])
+send("autofire 0"); send("arm 0")
+time.sleep(0.5)
+n_disarmed = shots()
+send("fire")
+ok = wait_for(lambda: any("FIRE refused: not armed" in e for e in snapshot()[1]), 3)
+check("MANUAL fire while disarmed is refused", ok and shots() == n_disarmed, f"shots {n_disarmed} -> {shots()}")
+send("arm 1")
+time.sleep(0.5)
+n0 = shots()
+time.sleep(3.0)
+check("auto-fire off: armed and locked, still no automatic shot", shots() == n0, f"{n0} -> {shots()}")
+send("fire")
+ok = wait_for(lambda: any("(manual)" in e for e in snapshot()[1]), 3)
+check("MANUAL fire while armed: fires once", ok and shots() == n0 + 1, f"{n0} -> {shots()}")
+send("fire")
+ok = wait_for(lambda: any("FIRE refused: cooldown" in e for e in snapshot()[1]), 3)
+check("a second click inside the cooldown is refused", ok and shots() == n0 + 1)
+send("autofire 1")
+
 run["hb"] = False                                  # the laptop goes away
 ok = wait_for(lambda: any("WATCHDOG" in e for e in snapshot()[1]), 4)
 time.sleep(0.5)

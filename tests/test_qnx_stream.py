@@ -291,6 +291,21 @@ def test_app():
     app.process(jpg, 100.5)
     assert not app.engage.armed, "QNX disarmed (watchdog or interlock): the laptop follows it"
 
+    class FakeGimbal:
+        fired = 0
+
+        def fire(self):
+            FakeGimbal.fired += 1
+
+    class FakeAimer:
+        gimbal = FakeGimbal()
+    app.ctl["aimer"] = FakeAimer()
+    app.fire_indicator()
+    assert FakeGimbal.fired == 1, "a shot pulses the Feather's fire indicator"
+    app.ctl["aimer"] = None
+    app.fire_indicator()                                   # no gimbal open (not tracking): harmless
+    assert app.engage.auto_fire is False, "the dashboard never lets the interlock shoot by itself"
+
     app.view["qnx"] = False                                # layer off: the laptop tracker is used again
     out, found = app.process(jpg, 100.6)
     assert not found and not app.qnx_summary()["used"]

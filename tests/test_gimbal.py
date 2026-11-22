@@ -56,6 +56,8 @@ class FakeFeather:
             self.energised[:3] = [True] * 3
         elif cmd == "S":
             pass
+        elif cmd == "X":
+            self.fired = getattr(self, "fired", 0) + 1
         elif cmd == "O":
             self.energised = [False] * 4
         elif cmd == "R":
@@ -114,6 +116,8 @@ def test_feather():
     g.set_oscillator(26500)
     assert f.osc == 26500
     assert g.center() == (90, 22) and f.energised == [True, True, True, False]
+    g.fire()
+    assert f.log[-1] == "X" and f.fired == 1 and f.energised == [True, True, True, False], "the fire pulse moves and energises nothing"
     # the fourth servo (channel 3, "A"): limp until commanded, moved only by its own command, never by C, and reported back
     assert f.energised[3] is False and g.aux == 90
     g.move_to(aux=45)

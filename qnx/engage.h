@@ -36,7 +36,7 @@ typedef struct { double ts; char text[64]; } EngageEvent;
 typedef struct {
     EngageConfig cfg;
     EngageState state;
-    int armed, auto_scan, shots;
+    int armed, auto_scan, auto_fire, shots;     /* auto_fire: shoot by itself on LOCK (default 1); 0 = only on a manual engage_fire() */
     int seen, settled, have_last_seen, have_lock_since, have_scan_t0;
     double last_seen, lock_since, cooldown_until, scan_t0;
     int n_events;                   /* total ever recorded; the newest ENGAGE_EVENTS are kept */
@@ -46,6 +46,11 @@ typedef struct {
 void engage_defaults(EngageConfig *cfg);
 void engage_init(Engage *e, const EngageConfig *cfg);               /* cfg may be NULL for the defaults */
 void engage_arm(Engage *e, int on, double ts);                      /* the master switch; arming resets the shot counter */
+
+/* A manual shot (the operator's click). Allowed only when ARMED and tracking is on, outside the cooldown and under max_shots;
+ * it does not need a lock, the operator decides. Returns FIRE_OK or why it was refused (also logged as an event). */
+typedef enum { FIRE_OK = 0, FIRE_NOT_ARMED, FIRE_NOT_TRACKING, FIRE_COOLDOWN, FIRE_LIMIT } FireResult;
+FireResult engage_fire(Engage *e, double ts);
 
 /* Call once per picture. Returns 1 on the picture where a shot is taken. *goal (may be NULL) is filled in. */
 int engage_update(Engage *e, double ts, int tracking, int found, int settled, double speed, double confidence,

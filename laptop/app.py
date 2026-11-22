@@ -65,6 +65,18 @@ cfg = {"lead_ms": 0, "min_conf": 80}                 # aim this far ahead of a m
                                      # to about the measured camera-to-servo delay, using the dashboard slider)
 predictor = LeadPredictor()
 engage = Engagement()                 # SEARCH/ACQUIRE/TRACK/LOCK/COOLDOWN and the fire interlocks (simulated emitter)
+engage.auto_fire = False              # a shot is taken only when the operator clicks Fire (while armed); never by itself on LOCK
+shots_seen = [None]                   # the shot count last seen from QNX, to pulse the Feather's fire indicator once per shot
+
+
+def fire_indicator():
+    """One pulse on the Feather (LED and FIRE_PIN) for a shot. Only possible while tracking has the Feather open."""
+    a = ctl.get("aimer")
+    if a is not None and hasattr(a.gimbal, "fire"):
+        try:
+            a.gimbal.fire()
+        except Exception:
+            pass
 telemetry = Telemetry()
 info = {"speed": 0.0, "settled": False}   # target speed (px/s) and whether the gimbal is on target, per frame
 ctl = {"tracking": False, "aimer": None, "error": None, "angles": None}
@@ -145,6 +157,9 @@ def qnx_aim_loop():
         if m is None:
             continue
         last = m["t_ms"]
+        if shots_seen[0] is not None and m["shots"] > shots_seen[0]:
+            fire_indicator()                              # QNX took a shot
+        shots_seen[0] = m["shots"]
         if not qnx_aim_active():
             continue
         try:
@@ -407,6 +422,7 @@ def process(jpg, ts=None):
         send_pi(f"track {1 if ctl['tracking'] else 0}")
         send_pi(f"min_conf {int(engage.min_confidence * 100)}")
         send_pi(f"auto_scan {1 if engage.auto_scan else 0}")
+        send_pi(f"autofire {1 if engage.auto_fire else 0}")
     dmap = depth_map(frame)                          # also None when neither the Depth layer nor the depth check is on
     if face and dmap is not None:
         tracker.check_depth(dmap)
@@ -667,6 +683,14 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/rt":
             send_pi(f"rt {'on' if q.get('on', ['1'])[0] == '1' else 'off'}")
             return self._send(b"{}")
+        if url.path == "/fire":
+            if qnx_status() is not None:                           # QNX owns the interlock: it fires or refuses (and logs why)
+                send_pi("fire")
+                return self._send(json.dumps({"via": "qnx"}).encode())
+            reason = engage.fire(time.time())
+            if reason is None:
+                fire_indicator()
+            return self._send(json.dumps({"via": "laptop", "refused": reason}).encode())
         if url.path == "/autoscan":
             engage.auto_scan = q.get("on", ["0"])[0] == "1"
             send_pi(f"auto_scan {1 if engage.auto_scan else 0}")

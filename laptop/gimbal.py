@@ -166,6 +166,11 @@ class Gimbal:
             self._sent.add("A")
         return self.pan, self.tilt
 
+    def fire(self):
+        """Pulse the Feather's fire indicator (its X command): the board LED and the FIRE_PIN output for a quarter of a second.
+        It moves nothing."""
+        return self._send("X")
+
     def release(self):
         """Let every servo go limp (the Feather firmware's O command). The next move to an axis energises it again."""
         self._send("O")
@@ -236,6 +241,16 @@ class AsyncGimbal:
                         self.error = None
                     except Exception as e:
                         self.error = str(e)
+
+    def fire(self):
+        """Pulse the fire indicator on the Feather (on its own thread: never blocks the video loop)."""
+        def go():
+            try:
+                with self._io:
+                    self._g.fire()
+            except Exception as e:
+                self.error = str(e)
+        threading.Thread(target=go, daemon=True).start()
 
     def status(self):
         with self._io:

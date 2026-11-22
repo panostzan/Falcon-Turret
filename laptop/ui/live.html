@@ -15,6 +15,8 @@
     <div class="stage">
       <img id="video" alt="Live camera picture">
       <div id="badge" class="badge">Connecting…</div>
+      <div id="flash" class="flash"></div>
+      <div id="fired" class="fired" hidden></div>
       <div id="nosignal" class="nosignal" hidden><b>NO CAMERA SIGNAL</b><span id="nosignal-why"></span></div>
     </div>
     <div class="layers" id="layers" role="group" aria-label="Layers"></div>
@@ -64,6 +66,7 @@
       <div class="row">
         <button id="arm" class="hold" title="Hold to arm">Hold to arm</button>
         <button id="scan" aria-pressed="false">Auto-scan</button>
+        <button id="fire" class="danger" disabled title="Fires once. Only works while armed.">Fire</button>
       </div>
       <p class="hint" id="shots">Shots 0 of 30 (simulated: no emitter yet)</p>
     </div>
@@ -164,6 +167,23 @@ arm.onpointerdown = () => {
 };
 const cancelHold = () => { clearTimeout(holdTimer); cancelAnimationFrame(raf); arm.style.setProperty('--p', 0); };
 arm.onpointerup = arm.onpointerleave = cancelHold;
+/* Fire: only while armed. The button, the Space bar and a click on the picture all send the same request; QNX decides and refuses when it must. */
+let lastFire = 0, prevShots = null, firedTimer = 0;
+function fire() {
+  if (!(S && S.engage && S.engage.armed) || performance.now() - lastFire < 400) return;
+  lastFire = performance.now();
+  api.post('/fire');
+}
+function showFired(n) {
+  const f = $('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
+  const t = $('fired'); t.textContent = 'Fired #' + n; t.hidden = false;
+  clearTimeout(firedTimer); firedTimer = setTimeout(() => { t.hidden = true; }, 1200);
+}
+$('fire').onclick = fire;
+document.querySelector('.stage').addEventListener('click', fire);
+document.addEventListener('keydown', e => {
+  if (e.key === ' ' && !['INPUT', 'TEXTAREA', 'BUTTON', 'SELECT'].includes(document.activeElement.tagName)) { e.preventDefault(); fire(); }
+});
 $('scan').onclick = () => api.post('/autoscan?on=' + (S && S.engage && S.engage.auto_scan ? 0 : 1));
 
 /* settings */
@@ -253,7 +273,11 @@ function render(s) {
   for (const st of STEPS) { const li = $('step-' + st); li.className = e.state === st ? 'now' + (st === 'SEARCH' ? ' search' : '') : ''; }
   arm.textContent = e.armed ? 'Armed: click to disarm' : 'Hold to arm'; arm.classList.toggle('armed', !!e.armed);
   $('mission-src').textContent = q.used ? (q.link ? 'decided on QNX' : 'QNX: laptop link lost, disarmed') : '';
-  $('shots').textContent = `Shots ${e.shots || 0} of ${e.max_shots || 30} (simulated: no emitter yet)`;
+  const shots = e.shots || 0;
+  if (prevShots !== null && shots > prevShots) showFired(shots);
+  prevShots = shots;
+  $('fire').disabled = !e.armed;
+  $('shots').textContent = e.armed ? `Shots ${shots} of ${e.max_shots || 30} · click the picture, press Space or Fire` : `Shots ${shots} of ${e.max_shots || 30} · arm to enable Fire`;
 
   $('pan').textContent = s.angles ? s.angles[0] : '–'; $('tilt').textContent = s.angles ? s.angles[1] : '–';
   if (s.sign) { $('sp').textContent = sgn(s.sign.pan); $('stl').textContent = sgn(s.sign.tilt); }
