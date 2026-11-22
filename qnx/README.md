@@ -4,11 +4,12 @@ Plan: make QNX the turret's brain and the laptop its display. The depth network 
 
 | Step | What | Status |
 |---|---|---|
-| 1 | Color tracker in C (`tracker.c`), same answers as `laptop/tracker.py` | written, **not yet compiled or tested** (no C compiler yet) |
+| 1 | Color tracker in C (`tracker.c`), same answers as `laptop/tracker.py` | **built with the Pi's own gcc on QNX 8.0 and verified**: 20 frames, identical to the Python tracker (0 disagreements, 0.0 px), 9 ms per frame on the Pi |
 | 2 | Mission state machine and fire interlock (ARM, shot limit, confidence threshold) in C | not started |
 | 3 | Watchdog: heartbeat from the laptop; on loss, force the safe state (disarmed, servos held) | not started |
 | 4 | Fixed-rate real-time control loop, with its own timing statistics | not started |
 | 5 | QNX health panel on the Diagnostics page (capture/encode rate, CPU, memory, jitter) | not started |
 
+Build and run on the Pi (it has gcc): copy `tracker.c`, `tracker.h`, `tracker_demo.c` to `~/turret_c`, then `gcc -O2 -std=c99 -o tracker_demo tracker_demo.c tracker.c -lm`.
 Build and test on the laptop: `python tests/test_qnx_tracker.py` (builds `tracker.c` with gcc, clang or `zig cc` and compares it with the Python tracker).
 Build for QNX: install the QNX SDP 8.0, run `qnxsdp-env.bat`, then in `qnx/`: `make CC="qcc -Vgcc_ntoaarch64le"`.
