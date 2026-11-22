@@ -51,13 +51,12 @@
 
     <div class="panel" id="lostbox" hidden>
       <h2 id="lost-title">Searching</h2>
-      <div class="big" id="lost-ago" style="color:var(--warn)">Target lost</div>
+      <div class="big" id="lost-ago" style="color:var(--warn)">–</div>
       <table>
-        <tr><th>Strategy</th><td id="lost-strategy">–</td></tr>
-        <tr><th>Last known position</th><td id="lost-where">–</td></tr>
-        <tr><th>Position confidence</th><td id="lost-conf">–</td></tr>
+        <tr><th>Mode</th><td id="lost-strategy">–</td></tr>
+        <tr><th>Last seen</th><td id="lost-where">–</td></tr>
+        <tr><th>Estimate</th><td id="lost-conf">–</td></tr>
       </table>
-      <small>Position confidence is an estimate that fades with time.</small>
     </div>
 
     <div class="panel">
@@ -225,13 +224,12 @@ function render(s) {
   if (showBox) {
     const sweep = s.tracking && e2.auto_scan && e2.state === 'SEARCH';
     $('lost-title').textContent = P.charAt(0) + P.slice(1).toLowerCase();
-    $('lost-ago').textContent = !lost ? 'Nothing seen yet' : P === 'OCCLUDED' ? `Hidden for ${lost.ago.toFixed(1)}s`
-      : P === 'REACQUIRING' ? `Lost ${lost.ago.toFixed(1)}s ago` : `Lost, last seen ${lost.ago.toFixed(0)}s ago`;
-    $('lost-strategy').textContent = P === 'SEARCHING' ? (sweep ? 'Sweeping the pan range' : 'Scanning the whole picture')
-      : P === 'OCCLUDED' ? (lost.pred ? 'Predicting from its last motion' : 'Holding its last position')
-      : P === 'REACQUIRING' ? (sweep ? 'Sweeping the pan range' : 'Watching where it was') : 'Prediction no longer reliable; still scanning';
-    $('lost-where').textContent = lost ? lost.where + (lost.heading ? `, was moving ${lost.heading}` : '') : '–';
-    $('lost-conf').textContent = lost ? Math.round(lost.pos_conf * 100) + '% (estimate)' : '–';
+    $('lost-ago').textContent = !lost ? 'No target' : lost.ago < 10 ? lost.ago.toFixed(1) + ' s' : lost.ago.toFixed(0) + ' s';
+    $('lost-strategy').textContent = P === 'SEARCHING' ? (sweep ? 'Sweep' : 'Scan')
+      : P === 'OCCLUDED' ? (lost.pred ? 'Predict' : 'Hold')
+      : P === 'REACQUIRING' ? (sweep ? 'Sweep' : 'Watch') : 'Scan';
+    $('lost-where').textContent = lost ? lost.where + (lost.heading ? `, ${lost.heading}` : '') : '–';
+    $('lost-conf').textContent = lost ? Math.round(lost.pos_conf * 100) + '%' : '–';
     $('lostbox').dataset.p = P;
   }
   const dead = !s.connected || s.frame_age > 2.5, cam = s.camera || {};
