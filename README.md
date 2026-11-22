@@ -2,9 +2,10 @@
 
 ### A real-time autonomous turret on QNX. Built in 36 hours with my good friend [Reich Kimbati](https://www.krplaerospace.com/) at a hackathon.
 
-A Raspberry Pi 5 running **QNX 8.0** does the time-critical work in native C: colour tracking, the mission state machine and the
-fire interlock. An on-device **TensorFlow Lite** face detector, ported to QNX, vetoes any shot when a person is in frame.
-A laptop turns the Pi's answers into servo angles for a four-axis mechanical turret with a retractable roof.
+Falcon Turret is a vision-guided turret. A webcam watches for a coloured target, and a Raspberry Pi 5 running **QNX 8.0** finds it,
+in native C, and decides whether the turret is allowed to fire. A face detector on the Pi, using QNX's TensorFlow Lite port, blocks
+any shot while a person is in frame. A laptop turns the Pi's results into servo angles for a dual-axis turret which is mounted on a
+dynamically lifting roof and rising platform.
 
 | | |
 |---|---|
