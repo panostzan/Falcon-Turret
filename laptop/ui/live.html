@@ -6,7 +6,7 @@
 
 <header class="top">
   <div class="brand">Turret</div>
-  <nav class="tabs"><a href="/" aria-current="page">Live</a><a href="/diagnostics">Diagnostics</a><a href="/qnx">QNX</a><a href="/check">Check</a></nav>
+  <nav class="tabs"><a href="/" aria-current="page">Live</a><a href="/diagnostics">Diagnostics</a><a href="/qnx">QNX</a><a href="/check">Check</a><a href="/servos">Servos</a></nav>
   <div class="status"><span id="st-video">Connecting…</span><span id="st-gimbal"></span><span id="st-depth"></span><span id="st-qnx"></span></div>
 </header>
 
@@ -58,6 +58,15 @@
         <tr><th>Position</th><td id="lost-where">–</td></tr>
         <tr><th>Estimate</th><td id="lost-conf">–</td></tr>
       </table>
+    </div>
+
+    <div class="panel" id="roofbox">
+      <h2>Roof <small id="roof-note"></small></h2>
+      <div class="big" id="roof-state">–</div>
+      <p class="hint" id="roof-hint" style="margin-top:6px"></p>
+      <div class="row" style="margin-top:8px">
+        <button id="hibernate" aria-pressed="false" title="Hibernate: the roof closes and nothing happens at all (no waking, no aiming, no arming) until you switch back to Dormant.">Hibernate</button>
+      </div>
     </div>
 
     <div class="panel">
@@ -184,6 +193,7 @@ document.querySelector('.stage').addEventListener('click', fire);
 document.addEventListener('keydown', e => {
   if (e.key === ' ' && !['INPUT', 'TEXTAREA', 'BUTTON', 'SELECT'].includes(document.activeElement.tagName)) { e.preventDefault(); fire(); }
 });
+$('hibernate').onclick = () => api.post('/hibernate?on=' + (S && S.roof && S.roof.hibernate ? 0 : 1));
 $('scan').onclick = () => api.post('/autoscan?on=' + (S && S.engage && S.engage.auto_scan ? 0 : 1));
 
 /* settings */
@@ -272,6 +282,24 @@ function render(s) {
 
   for (const st of STEPS) { const li = $('step-' + st); li.className = e.state === st ? 'now' + (st === 'SEARCH' ? ' search' : '') : ''; }
   arm.textContent = e.armed ? 'Armed: click to disarm' : 'Hold to arm'; arm.classList.toggle('armed', !!e.armed);
+  const R = s.roof || {}, ROOF_WORD = { DORMANT: 'Dormant', OPENING: 'Opening…', ACTIVE: 'Active', CLOSING: 'Closing…', HIBERNATE: 'Hibernating' };
+  $('roof-state').textContent = R.present ? (ROOF_WORD[R.state] || R.state) : (R.hibernate ? 'Hibernate' : 'Tracking is off');
+  $('roof-note').textContent = R.present ? (R.state === 'ACTIVE' ? 'open, platform up' : R.state === 'DORMANT' || R.state === 'HIBERNATE' ? 'closed, platform down' : 'moving') : '';
+  $('roof-hint').textContent = !R.present ? (R.hibernate ? 'Hibernate is set: it will stay closed and do nothing when tracking starts.' : 'The roof is controlled while tracking is on. It closes when you stop tracking.')
+    : R.state === 'DORMANT' ? 'Closed and watching. It opens when the target is seen.'
+    : R.state === 'ACTIVE' ? (R.sleep_in != null && R.sleep_in < 9.5 ? `Open. Closes in ${Math.ceil(R.sleep_in)} s without the target.` : 'Open. Closes after 10 s without the target.')
+    : R.state === 'HIBERNATE' ? 'Closed. Nothing happens until you switch back to Dormant.'
+    : R.state === 'OPENING' ? 'Opening: roof first, then the platform.' : 'Closing: platform first, then the roof.';
+  $('hibernate').textContent = R.hibernate ? 'Back to dormant' : 'Hibernate'; pressed($('hibernate'), !!R.hibernate);
+  const roofShut = !!(R.present && R.state !== 'ACTIVE');
+  arm.disabled = roofShut && !e.armed; arm.title = roofShut ? 'The roof must be open to arm' : 'Hold to arm';
+  const MN = s.manual || {};
+  if (MN.on) {
+    $('roof-state').textContent = 'Manual'; $('roof-note').textContent = '';
+    $('roof-hint').textContent = 'The Servos page is in control. Aiming, arming and firing are off until you go back to Auto.';
+    arm.disabled = !e.armed; arm.title = 'Not available in manual mode';
+  }
+  $('track').disabled = !!MN.on; $('track').title = MN.on ? 'Manual mode is on (Servos page): go back to Auto first' : '';
   $('mission-src').textContent = q.used ? (q.link ? 'decided on QNX' : 'QNX: laptop link lost, disarmed') : '';
   const shots = e.shots || 0;
   if (prevShots !== null && shots > prevShots) showFired(shots);

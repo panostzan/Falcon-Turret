@@ -22,6 +22,8 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ease                           # noqa: E402
+import roof as roofmod                # noqa: E402
+import manual as manualmod            # noqa: E402
 import syscheck                      # noqa: E402
 from gimbal import Gimbal            # noqa: E402
 from aim import Aimer              # noqa: E402
@@ -43,6 +45,7 @@ CLASSIC = open(os.path.join(HERE, "dashboard.html"), encoding="utf-8").read().en
 # The pages and assets of the current dashboard (laptop/ui/). Only these names are served, so no other file can be read.
 UI_FILES = {"/": ("live.html", "text/html; charset=utf-8"), "/diagnostics": ("diagnostics.html", "text/html; charset=utf-8"),
             "/qnx": ("qnx.html", "text/html; charset=utf-8"), "/check": ("check.html", "text/html; charset=utf-8"),
+            "/servos": ("servos.html", "text/html; charset=utf-8"),
             "/ui.css": ("ui.css", "text/css; charset=utf-8"), "/ui.js": ("ui.js", "application/javascript; charset=utf-8")}
 STARTED = time.time()
 BOOT = time.time()                  # lets the page detect a server restart and reconnect its video
@@ -79,7 +82,8 @@ def fire_indicator():
             pass
 telemetry = Telemetry()
 info = {"speed": 0.0, "settled": False}   # target speed (px/s) and whether the gimbal is on target, per frame
-ctl = {"tracking": False, "aimer": None, "error": None, "angles": None}
+ctl = {"tracking": False, "aimer": None, "error": None, "angles": None, "roof": None}
+roof_cfg = {"hibernate": False}       # the Hibernate switch: kept here so it survives stopping and starting tracking
 ctl_lock = threading.Lock()
 
 
@@ -162,6 +166,9 @@ def qnx_aim_loop():
         shots_seen[0] = m["shots"]
         if not qnx_aim_active():
             continue
+        roof_observe(time.time(), m["found"] and m["confidence"] >= engage.min_confidence)
+        if not roof_ready():                                  # roof closed or moving: no aiming, whatever is in view
+            continue
         try:
             with ctl_lock:
                 if ctl["tracking"] and ctl["aimer"]:
@@ -173,8 +180,164 @@ def qnx_aim_loop():
                 ctl["tracking"], ctl["error"] = False, f"gimbal: {e}"
 
 
+# ---- the roof and the platform (roof.py): dormant until the target shows up, hibernating when a person says so ----
+PARK_ON_CLOSE = os.environ.get("TURRET_ROOF_PARK", "on").lower() != "off"     # pan/tilt go home when the roof closes
+
+
+def roof_ready():
+    """May the turret aim and fire now? Never in manual mode. Otherwise always yes without a roof (tracking off, or the laptop webcam),
+    and with one only when it is open."""
+    if manual["on"]:
+        return False
+    r = ctl["roof"]
+    return r is None or r.can_aim
+
+
+def roof_block_reason():
+    return "manual mode is on (Servos page)" if manual["on"] else "the roof is not open"
+
+
+def roof_observe(now, seen):
+    r = ctl["roof"]
+    if r is not None:
+        r.observe(now, bool(seen))
+
+
+def roof_summary():
+    r = ctl["roof"]
+    if r is None:
+        return {"present": False, "hibernate": roof_cfg["hibernate"], "state": None, "sleep_in": None}
+    return dict(r.info(time.time()), present=True)
+
+
+def roof_closing(aimer):
+    """A close is starting (target gone for 10 s, Hibernate, or tracking stopped): nothing may stay armed, and pan/tilt go home
+    first so the barrel is not pointing sideways into the closing roof."""
+    engage.arm(False, time.time())
+    send_pi("arm 0")
+    if PARK_ON_CLOSE:
+        try:
+            aimer.home()
+        except Exception:
+            pass
+
+
+def close_roof_and_wait(r, aimer, timeout=3.0):
+    """Used when tracking stops: close up in the proper order and wait until the commands have really reached the Feather,
+    because the port is released right after."""
+    r.shutdown(time.time())
+    end = time.time() + timeout
+    while not r.closed and time.time() < end:
+        r.update(time.time())
+        time.sleep(0.02)
+    try:
+        aimer.gimbal.flush(1.5)
+    except Exception:
+        pass
+
+
+def roof_loop():
+    """About 50 times a second: send what the roof is due to send, and finish an opening or a closing."""
+    while True:
+        time.sleep(0.02)
+        r = ctl["roof"]
+        if r is None:
+            continue
+        try:
+            r.update(time.time())
+        except Exception as e:
+            ctl["error"] = f"gimbal: {e}"
+
+
+# ---- manual mode (manual.py): the Servos page moves each part by hand; the server stays the only owner of the Feather's port ----
+manual = {"on": False, "ctl": None, "gimbal": None, "error": None}
+MANUAL_PARK_TIMEOUT_S = 12.0
+
+
+def open_async_gimbal():
+    return AsyncGimbal(GIMBAL_PORT, tilt_limits=TILT_WINDOW or TILT_RANGE, lift_limits=(roofmod.LIFT_DOWN, roofmod.LIFT_UP))
+
+
+def manual_tilt_range():
+    return TILT_WINDOW or TILT_RANGE
+
+
+def manual_summary():
+    c = manual["ctl"]
+    return {"on": manual["on"], "parking": bool(c and c.locked)}
+
+
+def manual_panel():
+    c = manual["ctl"]
+    out = {"on": manual["on"], "error": manual["error"], "ranges": {k: list(v) for k, v in manualmod.default_ranges(manual_tilt_range()).items()},
+           "rest": manualmod.rest_position(manual_tilt_range()), "limits": {"roof_open_enough": manualmod.OPEN_ENOUGH, "lift_low_max": manualmod.LIFT_LOW_MAX}}
+    if c is not None:
+        out.update(c.info())
+    return out
+
+
+def enter_manual():
+    """Switch to manual mode: tracking stops first (it closes the roof and lowers the platform properly), then this server opens the
+    Feather itself. Returns an error string or None."""
+    if manual["on"]:
+        return None
+    if ctl["tracking"] or ctl["aimer"] is not None:
+        set_tracking(False)
+    engage.arm(False, time.time())
+    send_pi("arm 0")
+    send_pi("track 0")
+    g = None
+    try:
+        g = open_async_gimbal()
+        g.status()                                                # the Feather must really answer
+    except Exception as e:
+        if g is not None:
+            try:
+                g.close()
+            except Exception:
+                pass
+        manual["error"] = f"gimbal: {e}"
+        return manual["error"]
+    manual.update(ctl=manualmod.ManualControl(g, manual_tilt_range()), gimbal=g, error=None, on=True)
+    return None
+
+
+def exit_manual():
+    """Back to Auto: park everything in a safe order (platform down, then the roof closes), wait until it has really arrived, and only
+    then let go of the Feather's port. The manual loop does the moving; this waits for it."""
+    c, g = manual["ctl"], manual["gimbal"]
+    if not manual["on"] or c is None:
+        return None
+    c.park()
+    end = time.time() + MANUAL_PARK_TIMEOUT_S
+    while not c.settled and time.time() < end:
+        time.sleep(0.03)
+    try:
+        g.flush(1.5)
+        g.close()
+    except Exception:
+        pass
+    manual.update(on=False, ctl=None, gimbal=None)
+    return None if c.settled else "Returning to Auto took too long: check the servos"
+
+
+def manual_loop():
+    """About every 30 ms: one small step of every slider's walk (manual.py)."""
+    while True:
+        time.sleep(0.03)
+        c = manual["ctl"]
+        if c is None:
+            continue
+        try:
+            c.update()
+        except Exception as e:
+            manual["error"] = f"gimbal: {e}"
+
+
 def set_tracking(on):
     """Switch tracking on/off; opens the gimbal on first use. Returns an error string or None."""
+    if on and manual["on"]:
+        return "Manual mode is on (Servos page): press Back to Auto first."
     with ctl_lock:
         if not on:
             ctl["tracking"] = False
@@ -182,19 +345,27 @@ def set_tracking(on):
             send_pi("arm 0")
             send_pi("track 0")
             aimer, ctl["aimer"], ctl["angles"] = ctl["aimer"], None, None
+            roof, ctl["roof"] = ctl["roof"], None
             if aimer is not None:              # let go of the Feather's port, so the sliders and the system check can use it
                 try:
+                    if roof is not None:       # the roof closes first (platform down, then roof), and it must reach the Feather
+                        close_roof_and_wait(roof, aimer)
                     aimer.gimbal.close()
                 except Exception:
                     pass
             return None
         try:
             if ctl["aimer"] is None:
-                ctl["aimer"] = Aimer(AsyncGimbal(GIMBAL_PORT, tilt_limits=TILT_WINDOW or TILT_RANGE), tilt_window=TILT_WINDOW, tilt_enabled=TILT_ON, ease=EASE)
+                ctl["aimer"] = Aimer(AsyncGimbal(GIMBAL_PORT, tilt_limits=TILT_WINDOW or TILT_RANGE, lift_limits=(roofmod.LIFT_DOWN, roofmod.LIFT_UP)),
+                                     tilt_window=TILT_WINDOW, tilt_enabled=TILT_ON, ease=EASE)
                 if TILT_WINDOW:
                     engage.scan_tilt = ctl["aimer"].tilt_center
                 ctl["aimer"].sign.update(DEFAULT_SIGNS)
             ctl["angles"] = ctl["aimer"].gimbal.status()
+            if ctl["roof"] is None:            # the roof's position is unknown at start: put it at rest first (platform down, then roof)
+                aimer = ctl["aimer"]
+                ctl["roof"] = roofmod.Roof(lambda **kw: aimer.gimbal.move_to(**kw), on_close=lambda: roof_closing(aimer), hibernating=roof_cfg["hibernate"])
+                ctl["roof"].start(time.time())
             ctl["tracking"], ctl["error"] = True, None
             send_pi("track 1")
         except Exception as e:          # port busy / ESP unplugged / bad reply
@@ -423,6 +594,7 @@ def process(jpg, ts=None):
         send_pi(f"min_conf {int(engage.min_confidence * 100)}")
         send_pi(f"auto_scan {1 if engage.auto_scan else 0}")
         send_pi(f"autofire {1 if engage.auto_fire else 0}")
+    roof_observe(now, bool(face) and tracker.confidence >= engage.min_confidence)   # a sure sighting wakes a dormant roof
     dmap = depth_map(frame)                          # also None when neither the Depth layer nor the depth check is on
     if face and dmap is not None:
         tracker.check_depth(dmap)
@@ -449,7 +621,7 @@ def process(jpg, ts=None):
                 predictor.reset()
             try:
                 with ctl_lock:
-                    if ctl["tracking"] and not qnx_aim_active():     # on QNX the aim loop (qnx_aim_loop) does this, sooner
+                    if ctl["tracking"] and not qnx_aim_active() and roof_ready():     # on QNX the aim loop (qnx_aim_loop) does this, sooner
                         ctl["angles"] = ctl["aimer"].update((ax - w / 2) / (w / 2), (ay - h / 2) / (h / 2))
                         info["settled"] = ctl["aimer"].settled
             except Exception as e:
@@ -477,9 +649,11 @@ def process(jpg, ts=None):
     send_pi(f"aim {1 if info['settled'] else 0} {info['speed']:.1f}")
     log_tracking_change(found, qs is not None if tracker.armed else False, tracker.confidence, now)
     tracking = ctl["tracking"] and tracker.armed
+    if not roof_ready():
+        info["settled"] = False                      # nothing can lock while the roof is closed or moving
     _, scan_goal = engage.update(now, tracking, found, info["settled"], info["speed"],
                                  tracker.confidence if found else 0.0)
-    if scan_goal and tracking and ctl["aimer"]:      # auto-scan: sweep while searching
+    if scan_goal and tracking and ctl["aimer"] and roof_ready():      # auto-scan: sweep while searching (only with the roof open)
         with ctl_lock:
             ctl["angles"] = ctl["aimer"].gimbal.move_to(*scan_goal)
     return cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tobytes(), found
@@ -533,8 +707,8 @@ _cpu_mark = {"wall": time.time(), "cpu": time.process_time()}
 def run_syscheck(wiggle):
     """The one-click system check (see syscheck.py), wired to this server's real parts."""
     env = {"feed": lambda: feed_ref["feed"], "camera": camera_summary, "frame_age": lambda: time.time() - last_frame_t[0],
-           "qnx": qnx_summary, "tracking": lambda: bool(ctl["tracking"] and ctl["aimer"]),
-           "held_gimbal": lambda: ctl["aimer"].gimbal,
+           "qnx": qnx_summary, "tracking": lambda: bool(ctl["tracking"] and ctl["aimer"]) or manual["on"],
+           "held_gimbal": lambda: ctl["aimer"].gimbal if ctl["aimer"] else manual["gimbal"],
            "open_gimbal": lambda: Gimbal(GIMBAL_PORT, tilt_limits=TILT_WINDOW or TILT_RANGE),
            "laptop": system_stats, "depth": lambda: {"on": view["depth"], "available": bool(depth_state["net"] and getattr(depth_state["net"], "available", True))}}
     return syscheck.run(env, wiggle=wiggle)
@@ -598,7 +772,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(json.dumps(system_stats()).encode())
         elif self.path == "/state":
             self._send(json.dumps(dict(latest["state"], frame_age=round(time.time() - last_frame_t[0], 1), camera=camera_summary(),
-                                       video_wire=video_wire(), pi_video=pi_video())).encode())
+                                       video_wire=video_wire(), pi_video=pi_video(), roof=roof_summary(), manual=manual_summary())).encode())
+        elif self.path == "/servos.json":
+            self._send(json.dumps(manual_panel()).encode())
         elif self.path == "/qnx.json":
             self._send(json.dumps(qnx_panel()).encode())
         elif self.path == "/telemetry":
@@ -669,6 +845,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(b"{}")
         if url.path == "/arm":
             on = q.get("on", ["0"])[0] == "1"
+            if on and not roof_ready():                            # armed only with the roof open
+                return self._send(json.dumps({"refused": roof_block_reason()}).encode())
             engage.arm(on, time.time())
             qnx_sync["arm_cmd"] = time.time()
             send_pi(f"arm {1 if on else 0}")
@@ -681,7 +859,29 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/rt":
             send_pi(f"rt {'on' if q.get('on', ['1'])[0] == '1' else 'off'}")
             return self._send(b"{}")
+        if url.path == "/manual":
+            err = enter_manual() if q.get("on", ["0"])[0] == "1" else exit_manual()
+            return self._send(json.dumps(dict(manual_panel(), error=err)).encode())
+        if url.path == "/servo":
+            c = manual["ctl"]
+            axis, angle = q.get("axis", [""])[0], q.get("angle", [""])[0]
+            if not manual["on"] or c is None:
+                return self._send(json.dumps({"error": "manual mode is off"}).encode())
+            try:
+                blocked = c.set_target(axis, float(angle))
+            except ValueError:
+                return self._send(json.dumps({"error": "bad angle"}).encode())
+            return self._send(json.dumps(dict(c.info(), blocked=blocked)).encode())
+        if url.path == "/hibernate":
+            on = q.get("on", ["0"])[0] == "1"
+            roof_cfg["hibernate"] = on
+            r = ctl["roof"]
+            if r is not None:
+                r.set_hibernate(on, time.time())
+            return self._send(json.dumps(roof_summary()).encode())
         if url.path == "/fire":
+            if not roof_ready():
+                return self._send(json.dumps({"via": "laptop", "refused": roof_block_reason()}).encode())
             if qnx_status() is not None:                           # QNX owns the interlock: it fires or refuses (and logs why)
                 send_pi("fire")
                 return self._send(json.dumps({"via": "qnx"}).encode())
@@ -724,5 +924,7 @@ if __name__ == "__main__":
     threading.Thread(target=qnx_aim_loop, daemon=True).start()       # aims as soon as the Pi's answer arrives
     threading.Thread(target=stress_keepalive, daemon=True).start()
     threading.Thread(target=ease_loop, daemon=True).start()
+    threading.Thread(target=roof_loop, daemon=True).start()         # moves the roof and platform (roof.py)
+    threading.Thread(target=manual_loop, daemon=True).start()       # walks the Servos page's sliders (manual.py)
     print("Turret: http://localhost:8000", flush=True)
     ThreadingHTTPServer(("127.0.0.1", 8000), Handler).serve_forever()

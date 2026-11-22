@@ -22,7 +22,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "laptop"))
-from gimbal import CENTER, LIFT_RANGE, PAN_RANGE, TILT_RANGE   # noqa: E402
+from gimbal import AUX_RANGE, CENTER, LIFT_RANGE, PAN_RANGE, TILT_RANGE   # noqa: E402
 import tilt_calibration                            # noqa: E402
 
 LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "captures", "servo_sliders.log")
@@ -31,7 +31,7 @@ LIFT_HOME = 90                                    # the lift goes 0 to 150 (a so
 UPDATE_MS = 30
 AXES = ("pan", "tilt", "lift", "aux")
 AUX_HOME = 90                                     # the fourth servo (PCA9685 channel 3); the Centre button does NOT move it
-RANGES = {"pan": PAN_RANGE, "tilt": TILT_RANGE, "lift": LIFT_RANGE, "aux": (0, 180)}
+RANGES = {"pan": PAN_RANGE, "tilt": TILT_RANGE, "lift": LIFT_RANGE, "aux": AUX_RANGE}
 
 
 class SliderControl:

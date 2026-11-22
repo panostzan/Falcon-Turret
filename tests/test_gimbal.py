@@ -108,7 +108,8 @@ def test_feather():
     assert f.angle[2] == 150, "the lift goes up to 150 and no further (a software limit)"
     wide = Gimbal(link=FakeFeather(), lift_limits=(0, 180))
     wide.move_to(lift=999)
-    assert wide.lift == 180, "the limit can be widened when asked"
+    assert wide.lift == 150, "even when a caller asks for 0-180, the platform stops at 150"
+    assert wide.lift_limits == (0, 150)
     g.release()
     assert f.energised == [False] * 4 and f.log[-1] == "O"
     g.move_to(pan=90)
@@ -120,14 +121,16 @@ def test_feather():
     assert f.log[-1] == "X" and f.fired == 1 and f.energised == [True, True, True, False], "the fire pulse moves and energises nothing"
     # the fourth servo (channel 3, "A"): limp until commanded, moved only by its own command, never by C, and reported back
     assert f.energised[3] is False and g.aux == 90
-    g.move_to(aux=45)
-    assert f.log[-1] == "A45" and f.energised[3] is True and g.aux == 45, f.log
-    g.move_to(aux=45)
-    assert f.log[-1] == "A45" and f.log.count("A45") == 1, "an unchanged aux is not resent"
+    g.move_to(aux=100)
+    assert f.log[-1] == "A100" and f.energised[3] is True and g.aux == 100, f.log
+    g.move_to(aux=100)
+    assert f.log[-1] == "A100" and f.log.count("A100") == 1, "an unchanged aux is not resent"
     g.move_to(aux=400)
-    assert f.log[-1] == "A180" and g.aux == 180, "aux is clamped to 0-180"
+    assert f.log[-1] == "A140" and g.aux == 140, "the roof never goes past 140 (closed)"
+    g.move_to(aux=0)
+    assert f.log[-1] == "A20" and g.aux == 20, "and never opens past 20"
     g.center()
-    assert g.aux == 180, "Centre does not move the aux servo"
+    assert g.aux == 20, "Centre does not move the aux servo"
     g.move_to(pan=120, lift=30)
     assert (f.angle[0], f.angle[2]) == (120, 30) and g.pan == 120 and g.lift == 30
     for bad in ("L9999", "Lx", "F5", "Z"):                 # errors come back as ERR and raise on the laptop side
@@ -212,6 +215,38 @@ def test_no_limit():
     print("no-limit and custom-limit tests passed")
 
 
+def test_async_roof():
+    """AsyncGimbal also carries the platform (lift) and the roof (aux), and flush() waits until it is all on the wire."""
+    import time
+    from gimbal import AsyncGimbal
+
+    class SlowFeather(FakeFeather):
+        def write(self, data):
+            time.sleep(0.03)
+            super().write(data)
+
+    f = SlowFeather()
+    g = AsyncGimbal(link=f, lift_limits=(0, 180))
+    t0 = time.perf_counter()
+    g.move_to(aux=90)
+    g.move_to(lift=150)
+    assert (time.perf_counter() - t0) * 1000 < 20, "lift and aux requests do not wait for the Feather"
+    assert g.lift == 150 and g.aux == 90
+    assert g.flush(2.0) is True, "flush reports that everything was sent"
+    assert f.angle[2] == 150 and f.angle[3] == 90, f.angle
+    g.move_to(lift=999, aux=999)
+    g.flush(2.0)
+    assert (f.angle[2], f.angle[3]) == (150, 140), "lift is clamped to 150 at most, the roof to 90-140"
+    default = AsyncGimbal(link=FakeFeather())
+    default.move_to(lift=999)
+    default.flush(2.0)
+    assert default.lift == 150, "without a wider limit the lift still stops at 150"
+    assert g.flush(0.1) is True, "nothing pending: flush returns at once"
+    g.close()
+    default.close()
+    print("async roof (lift/aux/flush) tests passed")
+
+
 def test():
     test_no_limit()
     esp = FakeESP()
@@ -238,5 +273,6 @@ def test():
 if __name__ == "__main__":
     test()
     test_feather()
+    test_async_roof()
     test_udp()
     test_async()

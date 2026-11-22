@@ -18,6 +18,7 @@ import serial
 PAN_RANGE = (0, 180)
 TILT_RANGE = (0, 180)        # what the firmware accepts. The usable range is smaller and is a SOFTWARE limit: see tilt_limits below
 TILT_HOME = 22               # the firmware's start position for tilt
+AUX_RANGE = (20, 140)        # the ROOF (aux servo): 140 = closed, 20 = fully open. It is never commanded outside this, by anything.
 LIFT_RANGE = (0, 150)        # the lift (platform) servo is never sent above 150 degrees. A SOFTWARE limit: see lift_limits below
 CENTER = (90, TILT_HOME)
 
@@ -93,7 +94,9 @@ class Gimbal:
         tilt_limits: (low, high) the tilt is never commanded outside. Default: the saved calibration, else 0-45. Pass
         TILT_RANGE for no limit (the calibration tool does)."""
         self.tilt_limits = tuple(tilt_limits) if tilt_limits else default_tilt_limits()
-        self.lift_limits = tuple(lift_limits) if lift_limits else default_lift_limits()   # the lift never goes outside this
+        lo, hi = tuple(lift_limits) if lift_limits else default_lift_limits()
+        # The platform (lift) never goes above LIFT_RANGE[1] (150), whatever limits a caller, the roof code or a saved calibration asks for.
+        self.lift_limits = (min(lo, LIFT_RANGE[1]), min(hi, LIFT_RANGE[1]))
         if link is None and str(port).startswith("udp:"):
             link = UdpLink(port[4:])
         elif link is None:
@@ -161,7 +164,7 @@ class Gimbal:
         if lift is not None and ((l := _clamp(lift, *self.lift_limits)) != self.lift or "L" not in self._sent):
             self._send(f"L{l}")
             self._sent.add("L")
-        if aux is not None and ((a := _clamp(aux, 0, 180)) != self.aux or "A" not in self._sent):
+        if aux is not None and ((a := _clamp(aux, *AUX_RANGE)) != self.aux or "A" not in self._sent):
             self._send(f"A{a}")
             self._sent.add("A")
         return self.pan, self.tilt
@@ -207,30 +210,49 @@ class AsyncGimbal:
     def __init__(self, port=None, **kwargs):
         self._g = Gimbal(port, **kwargs)
         self.pan, self.tilt = self._g.pan, self._g.tilt
+        self.lift, self.aux = self._g.lift, self._g.aux      # the platform and the roof, as last requested
         self.error = None
         self.rtt_ms = deque(maxlen=100)    # how long the ESP took to answer recent commands
-        self._want = {"P": None, "T": None}
-        self._lock = threading.Lock()      # guards _want
+        self._want = {"P": None, "T": None, "L": None, "A": None}
+        self._busy = False                 # the sender thread is in the middle of a batch (see flush)
+        self._lock = threading.Lock()      # guards _want and _busy
         self._io = threading.Lock()        # one conversation with the ESP at a time
         self._wake = threading.Event()
         self._stop = False
         threading.Thread(target=self._run, daemon=True).start()
 
-    def move_to(self, pan=None, tilt=None):
+    def move_to(self, pan=None, tilt=None, lift=None, aux=None):
+        """Ask for new angles and return at once. `lift` is the platform, `aux` the roof (0-180 here; roof.py only uses 0 and 140)."""
         with self._lock:
             if pan is not None:
                 self.pan = self._want["P"] = _clamp(pan, *PAN_RANGE)
             if tilt is not None:
                 self.tilt = self._want["T"] = _clamp(tilt, *self._g.tilt_limits)
+            if lift is not None:
+                self.lift = self._want["L"] = _clamp(lift, *self._g.lift_limits)
+            if aux is not None:
+                self.aux = self._want["A"] = _clamp(aux, *AUX_RANGE)
         self._wake.set()
         return self.pan, self.tilt
+
+    def flush(self, timeout=1.5):
+        """Wait until every requested angle has been sent to the Feather (or the timeout). True if it all went."""
+        end = time.time() + timeout
+        while time.time() < end:
+            with self._lock:
+                idle = not self._busy and all(v is None for v in self._want.values())
+            if idle:
+                return True
+            time.sleep(0.01)
+        return False
 
     def _run(self):
         while not self._stop:
             self._wake.wait(0.5)
             self._wake.clear()
             with self._lock:
-                want, self._want = self._want, {"P": None, "T": None}
+                want, self._want = self._want, {"P": None, "T": None, "L": None, "A": None}
+                self._busy = any(v is not None for v in want.values())
             for axis, value in want.items():
                 if value is not None:
                     try:
@@ -241,6 +263,8 @@ class AsyncGimbal:
                         self.error = None
                     except Exception as e:
                         self.error = str(e)
+            with self._lock:
+                self._busy = False
 
     def fire(self):
         """Pulse the fire indicator on the Feather (on its own thread: never blocks the video loop)."""
@@ -262,7 +286,7 @@ class AsyncGimbal:
 
     def center(self):
         with self._lock:
-            self._want = {"P": None, "T": None}
+            self._want = {"P": None, "T": None, "L": None, "A": None}
         with self._io:
             self.pan, self.tilt = self._g.center()
         return self.pan, self.tilt

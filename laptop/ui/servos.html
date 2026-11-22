@@ -1,0 +1,129 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turret servos</title>
+<link rel="stylesheet" href="/ui.css">
+<style>
+  .servos { flex: 1; min-height: 0; overflow: auto; display: grid; gap: 14px; align-content: start; max-width: 860px; width: 100%; margin: 0 auto; }
+  .servos .panel > p { margin: 0 0 10px; }
+  .modebar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .modebar .state { font-size: 20px; }
+  .modebar .state.manual { color: var(--warn); }
+  .part { display: grid; grid-template-columns: 120px minmax(0, 1fr) 150px; gap: 6px 16px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); }
+  .part:first-of-type { border-top: 0; }
+  .part .nm { font-size: 16px; }
+  .part .nm small { display: block; font-size: 12px; }
+  .part .val { text-align: right; font-size: 20px; }
+  .part .val small { display: block; font-size: 12px; }
+  .part input[type=range] { height: 28px; }
+  .part .span { grid-column: 2; display: flex; justify-content: space-between; font-size: 12px; color: var(--dim); margin-top: -4px; }
+  .part.off { opacity: .45; }
+  .msg { min-height: 1.4em; color: var(--warn); font-size: 14px; }
+  @media (max-width: 700px) { .part { grid-template-columns: 1fr; } .part .span { grid-column: 1; } .part .val { text-align: left; } }
+</style>
+
+<header class="top">
+  <div class="brand">Turret</div>
+  <nav class="tabs"><a href="/">Live</a><a href="/diagnostics">Diagnostics</a><a href="/qnx">QNX</a><a href="/check">Check</a><a href="/servos" aria-current="page">Servos</a></nav>
+  <div class="status"><span id="st-video">Connecting…</span><span id="st-gimbal"></span><span id="st-depth"></span><span id="st-qnx"></span></div>
+</header>
+
+<main class="servos">
+  <section class="panel">
+    <h2>Manual control</h2>
+    <p class="hint">Move each mechanical part by hand, slowly. Entering manual mode stops tracking and switches off aiming, arming and firing. Going back to Auto
+      lowers the platform and closes the roof, in that order, before handing control back.</p>
+    <div class="modebar">
+      <span class="state" id="state">Auto</span>
+      <button id="mode" class="primary">Enter manual mode</button>
+    </div>
+    <div class="err" id="err"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Parts <small id="rest-note">assumed rest position: platform down, roof closed</small></h2>
+    <div id="parts"></div>
+    <div class="msg" id="msg"></div>
+  </section>
+</main>
+
+<script src="/ui.js"></script>
+<script>
+const PARTS = [
+  { key: 'pan',  name: 'Pan',      note: 'turns left and right' },
+  { key: 'tilt', name: 'Tilt',     note: 'tips up and down' },
+  { key: 'lift', name: 'Platform', note: 'rises once the roof is open' },
+  { key: 'roof', name: 'Roof',     note: 'closes once the platform is down' },
+];
+let M = null, entering = false;
+const dragging = {}, lastSent = {};
+
+/* build the four rows */
+const box = $('parts');
+for (const p of PARTS) {
+  const row = document.createElement('div');
+  row.className = 'part off'; row.id = 'row-' + p.key;
+  row.innerHTML = `<div class="nm">${p.name}<small>${p.note}</small></div>
+    <input type="range" id="sl-${p.key}" min="0" max="180" step="1" value="90" disabled aria-label="${p.name} angle">
+    <div class="val"><span id="now-${p.key}">–</span><small id="tgt-${p.key}">&nbsp;</small></div>
+    <div class="span"><span id="lo-${p.key}"></span><span id="hi-${p.key}"></span></div>`;
+  box.appendChild(row);
+  const sl = row.querySelector('input');
+  sl.onpointerdown = () => { dragging[p.key] = true; };
+  sl.onpointerup = sl.onpointercancel = () => { dragging[p.key] = false; push(p.key, true); };
+  sl.oninput = () => push(p.key, false);
+  sl.onkeydown = () => { dragging[p.key] = true; setTimeout(() => { dragging[p.key] = false; }, 400); };
+}
+
+/* send the slider's value, at most about 15 times a second (the server walks the servo there at a gentle fixed speed) */
+async function push(key, force) {
+  const sl = $('sl-' + key), now = performance.now();
+  if (!force && now - (lastSent[key] || 0) < 70) return;
+  lastSent[key] = now;
+  const r = await api.post(`/servo?axis=${key}&angle=${sl.value}`);
+  if (r.error) { $('msg').textContent = r.error; return; }
+  $('msg').textContent = r.blocked || '';
+  if (r.blocked && r.target) sl.value = r.target[key];          // the slider snaps back to what is actually allowed
+}
+
+$('mode').onclick = async () => {
+  if (entering) return;
+  entering = true; $('err').textContent = ''; $('msg').textContent = '';
+  const going = !(M && M.on);
+  $('mode').disabled = true; $('mode').textContent = going ? 'Entering manual mode…' : 'Returning to Auto…';
+  try {
+    const r = await api.post('/manual?on=' + (going ? 1 : 0));
+    $('err').textContent = r.error || '';
+  } catch (e) { $('err').textContent = 'The server did not answer.'; }
+  entering = false;
+  tick();
+};
+
+function render(m) {
+  M = m;
+  if (!m) { $('state').textContent = 'Server not reachable'; return; }
+  const on = !!m.on, locked = !!m.locked;
+  $('state').textContent = on ? (locked ? 'Returning to Auto…' : 'Manual') : 'Auto';
+  $('state').className = 'state' + (on ? ' manual' : '');
+  if (!entering) { $('mode').disabled = false; $('mode').textContent = on ? 'Back to Auto' : 'Enter manual mode'; $('mode').className = on ? 'danger' : 'primary'; }
+  if (m.error && !entering) $('err').textContent = m.error;
+  for (const p of PARTS) {
+    const sl = $('sl-' + p.key), range = (m.ranges || {})[p.key];
+    if (range) { sl.min = range[0]; sl.max = range[1]; $('lo-' + p.key).textContent = range[0] + '°'; $('hi-' + p.key).textContent = range[1] + '°'; }
+    sl.disabled = !on || locked;
+    $('row-' + p.key).className = 'part' + (on ? '' : ' off');
+    if (on && m.sent) {
+      $('now-' + p.key).textContent = m.sent[p.key] + '°';
+      $('tgt-' + p.key).textContent = m.sent[p.key] === m.target[p.key] ? 'there' : '→ ' + m.target[p.key] + '°';
+      if (!dragging[p.key]) sl.value = m.target[p.key];
+    } else {
+      $('now-' + p.key).textContent = '–'; $('tgt-' + p.key).innerHTML = '&nbsp;';
+      if (m.rest && !dragging[p.key]) sl.value = m.rest[p.key];
+    }
+  }
+}
+
+async function tick() { try { render(await api.get('/servos.json')); } catch (e) { render(null); } }
+setInterval(tick, 250); tick();
+poll('/state', 1000, setStatus);
+</script>
