@@ -1,10 +1,10 @@
 /* Turret dashboard. Olive-black matte panels. Colour means state: lime = good or selected, amber = searching or degraded, red = armed or
    fault; everything else is neutral. The system default font everywhere (numbers use tabular figures so they line up). Type scale: 12 / 13 / 14 / 16 / 20 / 24 / 30 px. */
 :root {
-  --bg: #0f120c;
-  --panel: #171b12;
-  --raise: #1f2418;
-  --line: #333b27;
+  --bg: #000000;
+  --panel: #050804;
+  --raise: #0a0f07;
+  --line: #222b19;
   --text: #dfe6cf;
   --dim: #8b9777;
   --teal: #b6e23a;            /* the signal colour (name kept so old rules still work) */
@@ -59,10 +59,10 @@ small, .dim { color: var(--dim); }
 .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
 /* the video, with a status badge */
-.stage { position: relative; flex: 1; min-height: 0; background: #070906; border: 1px solid var(--line); }
+.stage { position: relative; flex: 1; min-height: 0; background: #000000; border: 1px solid var(--line); }
 .stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
 .badge {
-  position: absolute; left: 14px; top: 14px; z-index: 3; padding: 3px 12px; background: rgba(10, 12, 7, .85);
+  position: absolute; left: 14px; top: 14px; z-index: 3; padding: 3px 12px; background: rgba(0, 0, 0, .85);
   border: 1px solid var(--line); font-weight: 600; font-size: 14px;
 }
 .badge.good { background: var(--teal); color: var(--teal-ink); border-color: var(--teal); }
@@ -73,7 +73,7 @@ small, .dim { color: var(--dim); }
 .hint { color: var(--dim); margin: 0; font-size: 12px; }
 
 .nosignal { position: absolute; inset: 0; z-index: 4; display: grid; place-content: center; gap: 10px; text-align: center; padding: 20px;
-  background: rgba(10, 12, 7, .82); }
+  background: rgba(0, 0, 0, .82); }
 .nosignal[hidden] { display: none; }          /* the display above would otherwise win over the hidden attribute */
 .nosignal b { font-size: 24px; color: var(--alarm); }
 .nosignal span { color: var(--text); max-width: 460px; }
@@ -110,7 +110,7 @@ button:disabled { opacity: .5; cursor: default; }
 .hold.armed { background: var(--alarm); color: #fff; border-color: var(--alarm); }
 
 /* confidence meter: the white tick is the level required to lock and fire */
-.meter { position: relative; height: 10px; background: #0a0d07; border: 1px solid var(--line); margin: 2px 0 8px; }
+.meter { position: relative; height: 10px; background: #020301; border: 1px solid var(--line); margin: 2px 0 8px; }
 .meter i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--dim); }
 .meter.sure i { background: var(--teal); }
 .meter.unsure i { background: var(--warn); }
@@ -138,7 +138,7 @@ td { font-family: var(--mono); }
 td:last-child, th:last-child { text-align: right; }
 th { color: var(--dim); }
 td.ok { color: var(--ok); } td.warn { color: var(--warn); } td.bad { color: var(--alarm); } td.na { color: var(--dim); }
-canvas { width: 100%; height: 100px; display: block; background: #0a0d07; border: 1px solid var(--line); margin: 6px 0 4px; }
+canvas { width: 100%; height: 100px; display: block; background: #020301; border: 1px solid var(--line); margin: 6px 0 4px; }
 .log { max-height: 220px; overflow: auto; font-family: var(--mono); font-size: 13px; }
 .log div { padding: 3px 0; border-bottom: 1px solid var(--line); }
 .log span { color: var(--dim); margin-right: 10px; }
