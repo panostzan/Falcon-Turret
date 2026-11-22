@@ -6,9 +6,6 @@ A Raspberry Pi 5 running **QNX 8.0** does the time-critical work in native C: co
 fire interlock. An on-device **TensorFlow Lite** face detector, ported to QNX, vetoes any shot when a person is in frame.
 A laptop turns the Pi's answers into servo angles for a four-axis mechanical turret with a retractable roof.
 
-> **Firing is simulated.** The laser did not arrive in time, so a "shot" is logged and shown on the dashboard and nothing is
-> emitted. Everything upstream of the trigger (tracking, lock, interlock, face veto) is real and running.
-
 | | |
 |---|---|
 | **OS** | QNX 8.0 (microkernel RTOS) on Raspberry Pi 5, 4x Cortex-A76 |
@@ -91,6 +88,9 @@ OS is for. Real-time means *on time*, not just fast.
 - **Measured, not claimed.** The QNX page plots the tracker's time for each picture against a 30 ms deadline line.
 
 ## Safety: it has to be hard to fire
+
+> **Firing is simulated.** The laser did not arrive in time, so a "shot" is logged and shown on the dashboard and nothing is
+> emitted. Everything upstream of the trigger (tracking, lock, interlock, face veto) is real and running.
 
 A shot needs **every one** of these at once. This logic runs on the Pi, in C (`qnx/engage.c`).
 
