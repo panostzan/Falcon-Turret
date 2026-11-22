@@ -23,7 +23,7 @@ SURE_FRAMES = 10       # frames in a row a target must be seen before confidence
 # OpenCV HSV: hue 0-180, so cyan/teal sits near 90 and pure blue near 120.
 PRESETS = {
     "teal": ((75, 70, 40), (105, 255, 255)),
-    "blue": ((108, 85, 85), (132, 255, 255)),    # blue: hue 120 of 180 in OpenCV. Daylight washes the disc out (saturation ~140) and brightens it (~230): S>=110, V>=100 keeps it and drops the bluish-grey ceiling
+    "blue": ((108, 85, 85), (132, 255, 255)),    # blue: hue 120 of 180 in OpenCV. Daylight washes the disc out (saturation ~80-140), so the floors are low; retune with /raw.jpg if the light changes
 }
 
 
