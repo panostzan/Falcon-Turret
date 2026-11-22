@@ -105,6 +105,23 @@ time.sleep(1.5)
 ts, ev = snapshot()
 check("UNARMED: locked for over a second and fired nothing", ts[-1][10] == "0" and ts[-1][11] == "0" and not any("FIRE" in e for e in ev))
 
+# The laptop re-sends the same target about once a second to keep the Pi in step. That must NOT restart the confidence
+# build-up (it used to: the confidence climbed to ~0.9 and was reset to 0 each time).
+lows = []
+for _ in range(14):
+    send("preset teal")
+    time.sleep(0.25)
+    ts, ev = snapshot()
+    lows.append(float(ts[-1][8]))
+check("re-sending the SAME target (as the laptop does every second) keeps the confidence up", min(lows) >= 0.9, f"lowest {min(lows):.2f} over 3.5 s")
+send("preset blue")                                    # a DIFFERENT target does start fresh (nothing blue in the picture)
+time.sleep(0.5)
+ts, ev = snapshot()
+check("choosing a DIFFERENT target starts fresh", ts[-1][3] == "0" and float(ts[-1][8]) == 0.0)
+send("preset teal")
+ok = wait_for(lambda: snapshot()[0][-1][9] in ("LOCK", "COOLDOWN"), 8)
+check("and back to teal: it finds the box and locks again", ok)
+
 send("arm 1")
 ok = wait_for(lambda: any("FIRE #1" in e for e in snapshot()[1]), 5)
 ts, ev = snapshot()

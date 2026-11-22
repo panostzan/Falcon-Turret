@@ -80,6 +80,11 @@ int tracker_use_preset(Tracker *t, const char *name)
     };
     for (size_t i = 0; i < sizeof P / sizeof P[0]; i++) {
         if (strcmp(P[i].name, name) == 0) {
+            /* Choosing the target that is ALREADY chosen changes nothing. The laptop repeats "preset blue" about once a second to
+             * keep the Pi in step; treating each repeat as a fresh start wiped the confidence build-up (it needs about 10
+             * pictures) just as it got high. */
+            if (t->armed && memcmp(t->lo, P[i].lo, sizeof t->lo) == 0 && memcmp(t->hi, P[i].hi, sizeof t->hi) == 0)
+                return 0;
             memcpy(t->lo, P[i].lo, sizeof t->lo);
             memcpy(t->hi, P[i].hi, sizeof t->hi);
             t->armed = 1; t->ref_area = 0; t->have_last = 0; t->missed = 0; t->streak = 0;
