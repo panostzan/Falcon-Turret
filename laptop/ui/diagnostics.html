@@ -4,71 +4,66 @@
 <title>Turret diagnostics</title>
 <link rel="stylesheet" href="/ui.css">
 <style>
-  /* One screen, three questions answered top to bottom: is it healthy (verdict + tiles), what is wrong (needs attention),
-     how fast is it (performance). Nothing scrolls except the event log inside its own panel. */
-  .diag { flex: 1; min-height: 0; display: grid; gap: 10px; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.45fr) minmax(0, 1fr);
-          grid-template-rows: auto minmax(0, 1fr); }
-  .verdict { grid-column: 1; display: flex; align-items: center; gap: 14px; padding: 12px 16px; background: var(--panel); border: 1px solid var(--line);
-             border-left: 4px solid var(--dim); }
-  .verdict .big { font: 700 22px/1.1 var(--font); letter-spacing: .16em; text-transform: uppercase; }
-  .verdict small { display: block; margin-top: 4px; font-size: 12px; line-height: 1.3; }
-  .verdict.ok { border-left-color: var(--ok); } .verdict.ok .big { color: var(--ok); }
-  .verdict.warn { border-left-color: var(--warn); } .verdict.warn .big { color: var(--warn); }
-  .verdict.bad { border-left-color: var(--alarm); } .verdict.bad .big { color: var(--alarm); }
-  .tiles { grid-column: 2 / span 2; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
-  .tile { background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--line); padding: 7px 9px; min-width: 0; }
-  .tile.ok { border-top-color: var(--ok); } .tile.warn { border-top-color: var(--warn); } .tile.bad { border-top-color: var(--alarm); }
-  .tile .n { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
-  .tile .v { font: 600 15px/1.25 var(--mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tile.bad .v { color: var(--alarm); } .tile.warn .v { color: var(--warn); } .tile.off .v { color: var(--dim); }
-  .tile .s { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Three questions, top to bottom and left to right: is it healthy (the banner), what is wrong (Needs attention), how fast is it (Speed).
+     The system list is the one place every part is named with its state. Nothing is shown twice. */
+  .diag { flex: 1; min-height: 0; display: grid; gap: 12px; grid-template-columns: minmax(340px, 0.9fr) minmax(0, 1.35fr); grid-template-rows: auto minmax(0, 1fr); }
+  .diag .panel { min-width: 0; min-height: 0; overflow: hidden; padding: 14px 18px; display: flex; flex-direction: column; }
+  .diag .panel > * { flex-shrink: 0; }
+  .diag h2 { margin: 0 0 12px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .diag h2 small { font: 400 13px var(--font); letter-spacing: 0; text-transform: none; color: var(--dim); }
+  .col { display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; }
+  .col .grow { flex: 1 1 0; min-height: 0; }
 
-  .diag .panel { min-height: 0; min-width: 0; overflow: hidden; padding: 10px 14px; display: flex; flex-direction: column; }
-  .diag h2 { margin-bottom: 8px; }
-  ol.issues { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .bottleneck { margin-top: 8px; padding: 9px 12px; background: var(--raise); border-left: 3px solid var(--teal); }
-  .bottleneck b { display: block; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); font-weight: 500; }
-  .bottleneck span { display: block; font-size: 13px; margin-top: 3px; }
-  ol.issues li { padding: 8px 0 8px 12px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--line); margin-bottom: 6px; background: var(--raise); }
+  .banner { grid-column: 1 / -1; display: flex; align-items: center; gap: 22px; padding: 14px 20px; background: var(--panel); border: 1px solid var(--line); border-left: 6px solid var(--dim); }
+  .banner .word { font: 700 30px/1 var(--font); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+  .banner .line { font-size: 16px; line-height: 1.35; color: var(--text); min-width: 0; }
+  .banner.ok { border-left-color: var(--ok); } .banner.ok .word { color: var(--ok); }
+  .banner.warn { border-left-color: var(--warn); } .banner.warn .word { color: var(--warn); }
+  .banner.bad { border-left-color: var(--alarm); } .banner.bad .word { color: var(--alarm); }
+
+  /* systems: one row per part */
+  ul.systems { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; justify-content: space-between; }
+  ul.systems li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; padding: 5px 0 5px 14px; border-top: 1px solid var(--line); border-left: 4px solid var(--line); margin-left: -4px; }
+  ul.systems li:first-child { border-top: 0; }
+  ul.systems li.ok { border-left-color: var(--ok); } ul.systems li.warn { border-left-color: var(--warn); } ul.systems li.bad { border-left-color: var(--alarm); }
+  ul.systems .nm { font: 600 16px var(--font); } ul.systems .nt { grid-column: 1; font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  ul.systems .vl { grid-row: 1 / span 2; grid-column: 2; font: 600 21px var(--mono); text-align: right; white-space: nowrap; }
+  ul.systems li.warn .vl { color: var(--warn); } ul.systems li.bad .vl { color: var(--alarm); } ul.systems li.off .vl { color: var(--dim); font-size: 17px; } ul.systems li.off .nm { color: var(--dim); }
+
+  /* needs attention */
+  ol.issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 190px; overflow: auto; }
+  ol.issues li { padding: 10px 14px; background: var(--raise); border-left: 4px solid var(--line); }
   ol.issues li.bad { border-left-color: var(--alarm); } ol.issues li.warn { border-left-color: var(--warn); }
-  ol.issues b { display: block; font-size: 14px; }
-  ol.issues li.bad b { color: var(--alarm); } ol.issues li.warn b { color: var(--warn); }
-  ol.issues .why { display: block; color: var(--text); font-size: 12.5px; margin-top: 2px; padding-right: 8px; }
-  ol.issues .fix { display: block; color: var(--teal); font-size: 12.5px; margin-top: 3px; }
-  .clear { flex: 1; display: grid; place-content: center; text-align: center; color: var(--ok); font: 600 16px var(--font); letter-spacing: .12em; text-transform: uppercase; }
-  .clear small { display: block; color: var(--dim); font-weight: 400; letter-spacing: 0; text-transform: none; margin-top: 4px; }
+  ol.issues b { display: block; font-size: 16px; } ol.issues li.bad b { color: var(--alarm); } ol.issues li.warn b { color: var(--warn); }
+  ol.issues .why { display: block; font-size: 14px; margin-top: 3px; line-height: 1.4; }
+  ol.issues .fix { display: block; font-size: 14px; margin-top: 4px; color: var(--teal); }
+  .clear { padding: 4px 0; color: var(--ok); font: 600 17px var(--font); } .clear small { display: block; color: var(--dim); font: 400 14px var(--font); margin-top: 3px; }
 
-  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
-  .kpi .num { font: 600 24px/1.1 var(--mono); } .kpi .lab { font-size: 11px; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; }
-  .kpi.ok .num { color: var(--ok); } .kpi.warn .num { color: var(--warn); } .kpi.bad .num { color: var(--alarm); } .kpi.off .num { color: var(--dim); }
-  .sub-h { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin: 4px 0 4px; display: flex; justify-content: space-between; gap: 8px; }
-  .sub-h b { color: var(--text); letter-spacing: 0; text-transform: none; font-weight: 500; }
-  .budget { display: flex; height: 22px; background: #0a0d07; border: 1px solid var(--line); }
+  /* speed */
+  .lead { font-size: 15px; line-height: 1.4; margin: 0 0 12px; padding: 10px 14px; background: var(--raise); border-left: 4px solid var(--teal); }
+  .lead b { color: var(--teal); font-weight: 600; }
+  .sub-h { font-size: 13px; color: var(--dim); margin: 0 0 6px; display: flex; justify-content: space-between; gap: 10px; }
+  .sub-h b { color: var(--text); font-weight: 500; text-align: right; }
+  .gapbox { flex: 1; min-height: 90px; position: relative; margin-bottom: 12px; }
+  .gapbox canvas { position: absolute; inset: 0; width: 100%; height: 100% !important; margin: 0 !important; }
+  .budget { display: flex; height: 24px; background: #0a0d07; border: 1px solid var(--line); }
   .budget i { display: block; height: 100%; min-width: 3px; }
-  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin: 5px 0 8px; color: var(--dim); }
-  .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 6px; background: var(--c); }
-  .legend b { color: var(--text); font-weight: 500; }
-  .chartbox { flex: 1; min-height: 60px; display: flex; flex-direction: column; }
-  .chartbox canvas { flex: 1; min-height: 0; height: 100%; margin: 2px 0; }
-  .cmp { display: grid; gap: 5px; margin-bottom: 8px; font-size: 12px; }
-  .cmp div { display: grid; grid-template-columns: 88px 1fr 168px; align-items: center; gap: 8px; }
-  .cmp .track { height: 10px; background: #0a0d07; border: 1px solid var(--line); } .cmp .track i { display: block; height: 100%; }
-  .cmp .val { text-align: right; color: var(--text); font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 14px; margin: 7px 0 12px; color: var(--dim); }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; background: var(--c); }
+  .legend b { color: var(--text); font-weight: 500; font-family: var(--mono); }
+  .cmp { display: grid; gap: 6px; font-size: 14px; margin-bottom: 4px; }
+  .cmp div { display: grid; grid-template-columns: 100px minmax(0, 1fr) 245px; align-items: center; gap: 10px; }
+  .cmp .track { height: 12px; background: #0a0d07; border: 1px solid var(--line); } .cmp .track i { display: block; height: 100%; }
+  .cmp .val { text-align: right; font: 13px var(--mono); white-space: nowrap; } .cmp .dim { color: var(--dim); }
 
-  .side table { font-size: 12px; } .side td, .side th { padding: 2px 0; }
-  .side .log { flex: 1; min-height: 40px; max-height: none; font-size: 12px; }
-  .side h2 + table + h2 { margin-top: 10px; }
-  .side-col { display: flex; flex-direction: column; min-height: 0; gap: 10px; }
-  .side-col .panel { flex: 1 1 0; }
-  .side-col .panel.readings { flex: 1.3 1 0; }
+  /* events and readings */
+  .events { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 5px; font-size: 14px; }
+  .events div { display: flex; gap: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .events span { color: var(--dim); font-family: var(--mono); font-size: 13px; width: 62px; flex: none; }
+  details.more { margin-top: 10px; font-size: 14px; } details.more summary { cursor: pointer; color: var(--dim); }
+  details.more table { width: 100%; margin-top: 6px; } details.more th { text-align: left; color: var(--dim); font-weight: 400; padding: 2px 0; } details.more td { text-align: right; font-family: var(--mono); font-size: 13px; }
+  details.more td.na { color: var(--dim); }
 
-  @media (max-width: 1000px) {         /* a narrow window: stack everything and let the page scroll */
-    html, body { height: auto; }
-    .diag { grid-template-columns: 1fr; grid-template-rows: none; }
-    .verdict, .tiles { grid-column: auto; }
-    .tiles { grid-template-columns: repeat(2, 1fr); }
-    .chartbox canvas { height: 100px; }
-  }
+  @media (max-width: 1000px) { html, body { height: auto; } .diag { grid-template-columns: 1fr; grid-template-rows: none; } .banner { flex-wrap: wrap; } .gapbox { min-height: 160px; } .cmp div { grid-template-columns: 90px 1fr; } .cmp .val { grid-column: 1 / -1; text-align: left; } }
 </style>
 
 <header class="top">
@@ -78,30 +73,27 @@
 </header>
 
 <main class="diag">
-  <section class="verdict" id="verdict"><div><div class="big" id="v-title">Checking…</div><small id="v-sub" class="dim"></small></div></section>
-  <section class="tiles" id="tiles"></section>
+  <section class="banner" id="banner"><div class="word" id="v-title">Checking…</div><div class="line" id="v-sub"></div></section>
 
-  <section class="panel">
-    <h2>Needs attention</h2>
-    <ol class="issues" id="issues"></ol>
-    <div class="bottleneck" id="bottleneck"><b>Biggest bottleneck</b><span id="bottleneck-text">measuring…</span></div>
-  </section>
+  <div class="col">
+    <section class="panel grow"><h2>Systems <small>each part and how it is doing</small></h2><ul class="systems" id="systems"></ul></section>
+    <section class="panel" style="height:150px"><h2>Recent events</h2><div class="events" id="log"><span>No events yet.</span></div></section>
+  </div>
 
-  <section class="panel">
-    <h2>Real-time performance</h2>
-    <div class="kpis" id="kpis"></div>
-    <div class="sub-h">Control loop, where the time goes <b id="budget-total">–</b></div>
-    <div class="budget" id="budget"></div>
-    <div class="legend" id="budget-legend"></div>
-    <div class="sub-h">Control message round trip <b>shorter is better</b></div>
-    <div class="cmp" id="cmp"></div>
-    <div class="sub-h">Gap between video pictures <b id="gap-now">–</b></div>
-    <div class="chartbox"><canvas id="c-gap"></canvas></div>
-  </section>
-
-  <div class="side-col side">
-    <section class="panel readings"><h2>All readings</h2><table id="readings"></table></section>
-    <section class="panel"><h2>Event log</h2><div class="log" id="log"><small>No events yet.</small></div></section>
+  <div class="col">
+    <section class="panel"><h2>Needs attention <small id="issue-count"></small></h2><ol class="issues" id="issues"></ol></section>
+    <section class="panel grow">
+      <h2>Speed</h2>
+      <p class="lead" id="lead">Measuring…</p>
+      <div class="sub-h">Gap between video pictures <b id="gap-now">–</b></div>
+      <div class="gapbox"><canvas id="c-gap"></canvas></div>
+      <div class="sub-h">Aiming delay, where the time goes <b id="budget-total">–</b></div>
+      <div class="budget" id="budget"></div>
+      <div class="legend" id="budget-legend"></div>
+      <div class="sub-h">Round trip of a control message <b>shorter is better</b></div>
+      <div class="cmp" id="cmp"></div>
+      <details class="more"><summary>More readings</summary><table id="readings"></table></details>
+    </section>
   </div>
 </main>
 
@@ -203,44 +195,70 @@ function budget() {
   return parts;
 }
 
+/* The gap chart, with a scale in ms and the "slow" zone shaded (the page calls a video link slow when the slowest 5% of gaps pass 150 ms). */
+function drawGap(canvas, values) {
+  if (!canvas || !canvas.getContext) return;
+  const dpr = window.devicePixelRatio || 1, W = canvas.clientWidth || 400, H = canvas.clientHeight || 110;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const g = canvas.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
+  const vals = (values || []).filter(v => v != null);
+  const padL = 52, top = 6, bottom = 4, max = Math.max(250, ...vals) * 1.08;
+  const y = v => top + (H - top - bottom) * (1 - v / max);
+  g.fillStyle = 'rgba(255,176,0,0.10)'; g.fillRect(padL, y(max), W - padL, y(150) - y(max));          // the slow zone
+  g.font = '12px Consolas, monospace'; g.textBaseline = 'middle'; g.lineWidth = 1;
+  for (const t of [0, 100, 200, 300, 400].filter(t => t <= max)) {
+    g.strokeStyle = '#333b27'; g.beginPath(); g.moveTo(padL, y(t)); g.lineTo(W, y(t)); g.stroke();
+    g.fillStyle = '#8b9777'; g.fillText(t + ' ms', 2, y(t));
+  }
+  g.fillStyle = '#ffb000'; g.textAlign = 'right'; g.fillText('slow', W - 6, y(150) - 9); g.textAlign = 'left';
+  if (vals.length < 2) { g.fillStyle = '#8b9777'; g.fillText('waiting for pictures…', padL + 12, H / 2); return; }
+  g.strokeStyle = '#b6e23a'; g.lineWidth = 1.8; g.beginPath();
+  vals.forEach((v, i) => { const px = padL + (W - padL) * i / (vals.length - 1); i ? g.lineTo(px, y(v)) : g.moveTo(px, y(v)); });
+  g.stroke();
+}
+
+const dot = s => s;
 function render() {
   const a = assess();
-  if (!a) { $('v-title').textContent = 'Server not reachable'; $('verdict').className = 'verdict bad'; $('tiles').innerHTML = ''; return; }
-  $('verdict').className = 'verdict ' + a.verdict.state;
+  if (!a) { $('v-title').textContent = 'No server'; $('v-sub').textContent = 'The dashboard server is not reachable. Start it and reload.'; $('banner').className = 'banner bad'; return; }
+  const s = S, q = s.qnx || {}, st = TEL ? TEL.stats : null, rtt = q.rtt || {};
+  const gap = st && st.interval_ms && st.interval_ms.n ? st.interval_ms : null;
+
+  // 1. the banner
+  $('banner').className = 'banner ' + a.verdict.state;
   $('v-title').textContent = a.verdict.title;
   $('v-sub').textContent = a.verdict.sub;
-  $('tiles').innerHTML = a.tiles.map(t => `<div class="tile ${t.state}"><div class="n">${t.name}</div><div class="v">${t.value}</div><div class="s">${t.sub || '&nbsp;'}</div></div>`).join('');
+
+  // 2. systems, one row per part
+  $('systems').innerHTML = a.tiles.map(t => `<li class="${t.state}"><span class="nm">${t.name}</span><span class="nt">${t.sub || '&nbsp;'}</span><span class="vl">${t.value}</span></li>`).join('');
+
+  // 3. needs attention
+  $('issue-count').textContent = a.issues.length ? `${a.issues.length} item${a.issues.length > 1 ? 's' : ''}` : '';
   $('issues').innerHTML = a.issues.length
     ? a.issues.map(i => `<li class="${i.sev}"><b>${i.title}</b><span class="why">${i.why}</span><span class="fix">Fix: ${i.fix}</span></li>`).join('')
     : '<div class="clear">Nothing needs attention<small>Everything that is switched on is working.</small></div>';
-  const s = S, q = s.qnx || {}, st = TEL ? TEL.stats : null, rtt = q.rtt || {};
-  const gap = st && st.interval_ms && st.interval_ms.n ? st.interval_ms : null;
-  const kpi = (state, num, lab) => `<div class="kpi ${state}"><div class="num">${num}</div><div class="lab">${lab}</div></div>`;
-  const tilesBy = Object.fromEntries(a.tiles.map(t => [t.name, t.state]));
-  $('kpis').innerHTML = kpi(tilesBy['Camera'] || 'off', s.connected ? `${s.fps}` : '–', 'video fps') +
-    kpi(tilesBy['Video link'] || 'off', gap ? ms(gap.p95).replace(' ms', '') : '–', 'slowest 5% gap, ms') +
-    kpi(tilesBy['QNX brain'] || 'off', q.present && q.used ? q.proc_ms : '–', 'QNX tracker, ms') +
-    kpi(tilesBy['Control link'] || 'off', rtt.udp && rtt.udp.n ? rtt.udp.p50 : '–', 'control link, ms');
+
+  // 4. speed
   const parts = budget(), total = parts.reduce((x, p) => x + p[1], 0);
   const big = parts.length ? parts.reduce((m, p) => (p[1] > m[1] ? p : m)) : null;
   const videoLate = gap ? gap.p95 : 0;
-  $('bottleneck-text').textContent = !s.connected ? 'No pictures are arriving, so nothing else can be measured.'
-    : videoLate > Math.max(40, total * 2) ? `Video delivery over Wi-Fi: pictures can be ${Math.round(videoLate)} ms apart. Aiming does not wait for video (the control loop is about ${ms(total)}).`
-    : big ? `The control loop is about ${ms(total)} end to end, mostly ${big[0].toLowerCase()} (${ms(big[1])}).` : 'Waiting for data.';
+  $('lead').innerHTML = !s.connected ? 'No pictures are arriving, so nothing else can be measured.'
+    : videoLate > Math.max(40, total * 2) ? `<b>Biggest delay: video over Wi-Fi.</b> Pictures can be ${Math.round(videoLate)} ms apart. Aiming does not wait for video: its own loop takes about ${ms(total)}.`
+    : big ? `<b>Aiming takes about ${ms(total)}</b> from picture to servo command, mostly ${big[0].toLowerCase()} (${ms(big[1])}).` : 'Waiting for data.';
+  $('gap-now').textContent = gap ? `typical ${ms(gap.p50)}, slowest 5%: ${ms(gap.p95)}` : '–';
   $('budget-total').textContent = parts.length ? `about ${ms(total)}` : 'waiting for data';
   $('budget').innerHTML = parts.map(([n, v, c]) => `<i title="${n}" style="width:${Math.max(1, v / total * 100)}%;background:${c}"></i>`).join('');
-  const biggest = parts.length ? parts.reduce((m, p) => (p[1] > m[1] ? p : m)) : null;
-  $('budget-legend').innerHTML = parts.map(([n, v, c]) => `<span style="--c:${c}">${n} <b>${ms(v)}</b>${biggest && biggest[0] === n && parts.length > 1 ? ' (biggest)' : ''}</span>`).join('') || '<span style="--c:#333b27">no control-loop data yet</span>';
+  $('budget-legend').innerHTML = parts.map(([n, v, c]) => `<span style="--c:${c}">${n} <b>${ms(v)}</b></span>`).join('') || '<span style="--c:#333b27">no control-loop data yet</span>';
   const cmpMax = Math.max(1, (rtt.udp && rtt.udp.p95) || 0, (rtt.stream && rtt.stream.p95) || 0);
-  const bar = (label, r, color) => r && r.n ? `<div><span>${label}</span><span class="track"><i style="width:${Math.max(2, r.p95 / cmpMax * 100)}%;background:${color}"></i></span><span class="val">${ms(r.p50)} · slowest ${ms(r.p95)}</span></div>` : `<div><span>${label}</span><span class="track"></span><span class="val dim">no data</span></div>`;
+  const bar = (label, r, color) => r && r.n ? `<div><span>${label}</span><span class="track"><i style="width:${Math.max(2, r.p95 / cmpMax * 100)}%;background:${color}"></i></span><span class="val">${ms(r.p50)} typical, ${ms(r.p95)} slowest</span></div>` : `<div><span>${label}</span><span class="track"></span><span class="val dim">no data</span></div>`;
   $('cmp').innerHTML = bar('Own channel', rtt.udp, '#b6e23a') + bar('Inside video', rtt.stream, '#ffb000');
-  $('gap-now').textContent = gap ? `typical ${ms(gap.p50)}, slowest 5% ${ms(gap.p95)}` : '–';
+
   const rd = (k, v, cls) => `<tr><th>${k}</th><td class="${cls || ''}">${v}</td></tr>`;
   const cam = s.camera || {};
   $('readings').innerHTML =
     rd('Video source', s.source || 'Pi') + rd('Picture size', s.connected ? `${s.kb} KB` : '–') + rd('Pictures dropped', s.dropped) +
     rd('Camera report', cam.state === 'ok' ? 'detected' : cam.state === 'stalled' ? (cam.usb === false ? 'not on USB' : 'silent') : 'none') +
-    rd('Target color', s.armed ? 'set' : 'not set') + rd('Confidence', s.confidence != null ? Math.round(s.confidence * 100) + '%' : '–') +
+    rd('Target colour', s.armed ? 'set' : 'not set') + rd('Confidence', s.confidence != null ? Math.round(s.confidence * 100) + '%' : '–') +
     rd('Mission (QNX)', q.present ? `${q.state}${q.armed ? ', ARMED' : ''}, shots ${q.shots}` : '–') +
     rd('Distance sensor', 'not connected', 'na') + rd('IR emitter / receiver', 'not connected', 'na') +
     (SYS ? rd('Uptime', Math.floor(SYS.uptime_s / 60) + ' min') + rd('Python', SYS.python) : '');
@@ -250,10 +268,18 @@ function render() {
 function renderTelemetry(t) {
   TEL = t;
   if (t) {
-    drawChart($('c-gap'), [{ v: t.series.interval_ms, color: '#b6e23a' }]);
-    const qe = (S && S.qnx && S.qnx.events || []).map(([ago, text]) => [ago, 'QNX: ' + text]);
+    drawGap($('c-gap'), t.series.interval_ms);
+    // each QNX event is also logged by the laptop a moment later: show it once
+    const qe = (S && S.qnx && S.qnx.events || []).map(([ago, text]) => [ago, text]);
     const all = t.events.concat(qe).sort((a, b) => a[0] - b[0]);
-    $('log').innerHTML = all.length ? all.map(([ago, text]) => `<div><span>${ago}s ago</span>${text}</div>`).join('') : '<small>No events yet.</small>';
+    const seen = [], out = [];
+    for (const [ago, text] of all) {
+      const key = text.replace(/^QNX:\s*/, '');
+      if (seen.some(([k, t0]) => k === key && Math.abs(t0 - ago) < 0.6)) continue;
+      seen.push([key, ago]); out.push([ago, key]);
+    }
+    const fmt = ago => (ago < 90 ? Math.round(ago) + ' s' : Math.round(ago / 60) + ' min') + ' ago';
+    $('log').innerHTML = out.length ? out.slice(0, 4).map(([ago, text]) => `<div><span>${fmt(ago)}</span>${text}</div>`).join('') : '<div>No events yet.</div>';
   }
   render();
 }
@@ -261,4 +287,5 @@ function renderTelemetry(t) {
 poll('/state', 500, s => { S = s; render(); });
 poll('/system', 2000, x => { SYS = x; render(); });
 poll('/telemetry', 1000, renderTelemetry);
+window.addEventListener('resize', () => { if (TEL) drawGap($('c-gap'), TEL.series.interval_ms); });
 </script>
