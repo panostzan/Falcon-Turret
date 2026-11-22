@@ -51,6 +51,7 @@ STARTED = time.time()
 BOOT = time.time()                  # lets the page detect a server restart and reconnect its video
 
 new_frame = threading.Condition()   # notified whenever `latest` changes
+raw_frame = {"jpg": None}          # the newest picture exactly as the camera sent it (no overlays), for calibration
 latest = {"jpg": None, "seq": 0, "state": {"connected": False, "fps": 0, "kb": 0, "boot": BOOT}}
 
 tracker = ColorTracker()
@@ -701,6 +702,7 @@ def capture_loop():
         last_frame_t[0] = last_frame
         age_ms = (last_frame - ts) * 1000     # how long the frame waited before we got to it
         t_proc = time.perf_counter()
+        raw_frame["jpg"] = jpg
         jpg, found = process(jpg, ts)
         proc_ms = (time.perf_counter() - t_proc) * 1000
         pan, tilt = ctl["angles"] or (None, None)
@@ -810,6 +812,8 @@ class Handler(BaseHTTPRequestHandler):
             rtt = list(ctl["aimer"].gimbal.rtt_ms) if ctl["aimer"] else []
             snap["servo_rtt_ms"] = round(statistics.median(rtt), 1) if rtt else None
             self._send(json.dumps(snap).encode())
+        elif self.path.startswith("/raw.jpg"):
+            self._send(raw_frame["jpg"] or b"", "image/jpeg") if raw_frame["jpg"] else self._send(b"{}", code=404)
         elif self.path.startswith("/frame.jpg"):
             self._frame()
         elif self.path.startswith("/stream"):
