@@ -7,10 +7,13 @@
  *   turretd <width> <height> [control_port]        control_port defaults to 5005 (UDP, localhost only)
  *
  * Output lines (stdout):
- *   T seq t_ms found cx cy w h confidence state armed shots link proc_us scan_pan
+ *   T seq t_ms found cx cy w h confidence state armed shots link proc_us scan_pan gate human ai_ok face_ms
+ *       gate = the human gate is on, human = a human is in view (only while ai_ok), ai_ok = the AI reported recently, face_ms = its last inference time
  *   E t_ms text                                     (an event: state change, ARMED, FIRE #n, WATCHDOG ...)
  * Control lines (UDP):
- *   preset teal|blue    clear    track 0|1    arm 0|1    min_conf 50..100    auto_scan 0|1
+ *   preset teal|blue    clear    track 0|1    arm 0|1    min_conf 50..100    auto_scan 0|1    autofire 0|1    fire
+ *   humangate 0|1       switch the human gate (default off): with it on, no shot while a human is in view or the AI is silent
+ *   human 0|1           the AI's answer (1 = a human is in view)         faceinfo <ms>    the AI's last inference time
  *   aim <settled 0|1> <speed>       what the aiming loop says about the gimbal and the target's speed
  *   hb                              heartbeat from the laptop
  *
@@ -47,6 +50,7 @@ typedef struct {
     int hb_seen, link_ok;
     double hb_last;
     int events_printed;
+    double face_ms;                  /* the AI program's last inference time, -1 until it reports */
 } Brain;
 
 static void print_new_events(Brain *b)
@@ -74,6 +78,9 @@ static void handle_control(Brain *b, char *line)
     else if (sscanf(line, "auto_scan %d", &n) == 1) b->engage.auto_scan = n != 0;
     else if (sscanf(line, "autofire %d", &n) == 1) b->engage.auto_fire = n != 0;
     else if (strcmp(line, "fire") == 0) { engage_fire(&b->engage, now_s()); print_new_events(b); }
+    else if (sscanf(line, "humangate %d", &n) == 1) b->engage.human_gate = n != 0;
+    else if (sscanf(line, "human %d", &n) == 1) { engage_set_human(&b->engage, n, now_s()); print_new_events(b); }
+    else if (sscanf(line, "faceinfo %lf", &speed) == 1) b->face_ms = speed;
     else if (sscanf(line, "min_conf %d", &n) == 1) { if (n >= 50 && n <= 100) b->engage.cfg.min_confidence = n / 100.0; }
     else if (sscanf(line, "aim %d %lf", &n, &speed) == 2) { b->settled = n != 0; b->speed = speed; }
     else if (strcmp(line, "hb") == 0) {
@@ -92,6 +99,7 @@ int main(int argc, char **argv)
     b.tracker = tracker_new(w, h);
     if (!b.tracker) { fprintf(stderr, "cannot allocate the tracker\n"); return 1; }
     engage_init(&b.engage, NULL);
+    b.face_ms = -1.0;
     b.link_ok = 1;
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -138,9 +146,10 @@ int main(int argc, char **argv)
         engage_update(&b.engage, t0, b.tracking, r.found, b.settled, b.speed, r.found ? r.confidence : 0.0, &goal);
         double t1 = now_s();
         print_new_events(&b);
-        printf("T %ld %.0f %d %.1f %.1f %.1f %.1f %.3f %s %d %d %d %.0f %.1f\n", seq, t1 * 1000.0, r.found, r.cx, r.cy, r.w, r.h,
+        int ai_ok = b.engage.human_ts > 0.0 && t1 - b.engage.human_ts <= b.engage.cfg.human_timeout_s;
+        printf("T %ld %.0f %d %.1f %.1f %.1f %.1f %.3f %s %d %d %d %.0f %.1f %d %d %d %.0f\n", seq, t1 * 1000.0, r.found, r.cx, r.cy, r.w, r.h,
                r.found ? r.confidence : 0.0, engage_state_name(b.engage.state), b.engage.armed, b.engage.shots, b.link_ok,
-               (t1 - t0) * 1e6, goal.has_goal ? goal.pan : -1.0);
+               (t1 - t0) * 1e6, goal.has_goal ? goal.pan : -1.0, b.engage.human_gate, ai_ok && b.engage.human, ai_ok, b.face_ms);
     }
 done:
     free(img);

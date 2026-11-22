@@ -23,6 +23,7 @@ typedef struct {
     int    acquire_frames, lock_frames, max_shots;
     double dwell_s, cooldown_s, lost_s, max_speed, min_confidence;
     double scan_lo, scan_hi, scan_speed, scan_tilt;
+    double human_timeout_s;         /* with the human gate on, a report older than this counts as "AI check offline" (fail-safe) */
 } EngageConfig;
 
 typedef struct {
@@ -36,6 +37,8 @@ typedef struct { double ts; char text[64]; } EngageEvent;
 typedef struct {
     EngageConfig cfg;
     EngageState state;
+    int human_gate, human;          /* the human gate (default OFF) and the latest report from the AI: 1 = a human is in view */
+    double human_ts;                /* when that report arrived; 0 = never */
     int armed, auto_scan, auto_fire, shots;     /* auto_fire: shoot by itself on LOCK (default 1); 0 = only on a manual engage_fire() */
     int seen, settled, have_last_seen, have_lock_since, have_scan_t0;
     double last_seen, lock_since, cooldown_until, scan_t0;
@@ -49,8 +52,14 @@ void engage_arm(Engage *e, int on, double ts);                      /* the maste
 
 /* A manual shot (the operator's click). Allowed only when ARMED and tracking is on, outside the cooldown and under max_shots;
  * it does not need a lock, the operator decides. Returns FIRE_OK or why it was refused (also logged as an event). */
-typedef enum { FIRE_OK = 0, FIRE_NOT_ARMED, FIRE_NOT_TRACKING, FIRE_COOLDOWN, FIRE_LIMIT } FireResult;
+typedef enum { FIRE_OK = 0, FIRE_NOT_ARMED, FIRE_NOT_TRACKING, FIRE_COOLDOWN, FIRE_LIMIT, FIRE_HUMAN, FIRE_AI_STALE } FireResult;
 FireResult engage_fire(Engage *e, double ts);
+
+/* The human gate. engage_set_human() records the AI's latest answer (and logs HUMAN detected / cleared when it changes).
+ * engage_human_block() says whether the gate forbids a shot right now: FIRE_HUMAN while a human is in view, FIRE_AI_STALE when the
+ * gate is on but the AI has not reported within human_timeout_s, else FIRE_OK. With the gate off it is always FIRE_OK. */
+void engage_set_human(Engage *e, int present, double ts);
+FireResult engage_human_block(const Engage *e, double ts);
 
 /* Call once per picture. Returns 1 on the picture where a shot is taken. *goal (may be NULL) is filled in. */
 int engage_update(Engage *e, double ts, int tracking, int found, int settled, double speed, double confidence,

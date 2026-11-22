@@ -126,6 +126,46 @@ def test():
     fired, t = run(e, 5)
     assert fired == 0 and e.state == "LOCK" and e.shots == 0, "locked and armed, but no automatic shot"
     assert e.fire(t) is None and e.shots == 1, "the click still fires"
+
+    # the human gate: off by default, never blocks; on, it blocks while a human is in view and when the AI is silent (fail-safe)
+    e = Engagement()
+    e.arm(True, 0.0)
+    e.update(0.0, True, False, False)
+    e.set_human(True, 0.1)
+    assert e.human_block(0.2) is None, "gate off: a human in view blocks nothing"
+    e.human_gate = True
+    assert e.human_block(0.2) == "human detected"
+    assert e.fire(0.3) == "human detected" and e.shots == 0, "armed + tracking, but a human is in view: refused"
+    assert e.events[-1][1] == "FIRE refused: human detected"
+    e.set_human(False, 0.5)
+    assert e.events[-2][1] == "HUMAN cleared" or e.events[-1][1] == "HUMAN cleared"
+    assert e.fire(0.6) is None and e.shots == 1, "the human left: the click fires"
+    e.set_human(False, 1.0)
+    assert e.human_block(3.5) == "face check offline", "no report for over 2 s: the gate blocks (fail-safe)"
+    e = Engagement()
+    e.human_gate = True
+    e.arm(True, 0.0)
+    e.update(0.0, True, False, False)
+    assert e.fire(0.1) == "face check offline", "gate on and the AI has never reported: blocked"
+    e = Engagement()
+    e.auto_fire = True
+    e.human_gate = True
+    e.arm(True, 0)
+    e.set_human(True, 0.0)
+    t = 0.0
+    fired = 0
+    for _ in range(90):                                      # locked and armed, auto-fire on, but a human is in view the whole time
+        e.set_human(True, t)
+        f, _g = e.update(t, True, True, True)
+        fired += f
+        t += DT
+    assert fired == 0 and e.state == "LOCK", "auto-fire respects the gate"
+    for _ in range(60):
+        e.set_human(False, t)
+        f, _g = e.update(t, True, True, True)
+        fired += f
+        t += DT
+    assert fired >= 1, "and fires again once the human leaves"
     print("engagement tests passed")
 
 

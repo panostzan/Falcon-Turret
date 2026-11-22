@@ -25,6 +25,7 @@ import time
 
 from shrink import shrink_planes      # lives next to this file on the Pi (~/bin/shrink.py)
 import sysmon                          # ~/bin/sysmon.py: live QNX stats and the real-time demo switches
+import aiproc                          # ~/bin/aiproc.py: keeps the face-detection AI program running at low priority
 
 UNIT = "5"
 FPS = sys.argv[1] if len(sys.argv) > 1 else "30"
@@ -91,6 +92,10 @@ class Brain:
         self.ok = True
         self.client = None                  # the laptop's address, learned from its first UDP datagram
         self.monitor = sysmon.Monitor(self._push_udp)    # before any thread starts: the UDP thread uses it from its first datagram
+        subprocess.call(["slay", "-f", "facewatch"], stderr=subprocess.DEVNULL)
+        self.face = aiproc.build(self._push_udp)         # None unless the AI program and its model are installed under ~/ai
+        if self.face is not None:
+            self.face.start()
         self.udp = None
         try:
             self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -136,6 +141,8 @@ class Brain:
         Returns a marker for take(): turretd's answer to THIS picture is the first one after it."""
         if not self.ok:
             return 0
+        if self.face is not None:
+            self.face.submit(raw)                    # the AI gets a few frames a second, at its own low priority
         with self._cv:
             self._frame = raw
             self._cv.notify_all()

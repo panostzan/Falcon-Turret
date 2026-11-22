@@ -143,6 +143,20 @@ def percentile(values, q):
     return values[min(len(values) - 1, int(len(values) * q))] if values else None
 
 
+def parse_faces(text):
+    """The face program's report ('FACE <count> <ms> [x y w h score]...', boxes as fractions of the picture), or None."""
+    for line in text.splitlines():
+        p = line.split()
+        if len(p) >= 3 and p[0] == "FACE":
+            try:
+                n, ms = int(p[1]), float(p[2])
+                vals = [float(v) for v in p[3:]]
+            except ValueError:
+                return None
+            return {"n": n, "ms": ms, "boxes": [tuple(vals[i:i + 5]) for i in range(0, len(vals) - 4, 5)]}
+    return None
+
+
 def parse_video_stats(text):
     """The Pi's own video measurements ('V <pictures/s> <KB per picture> <encode ms> <CPU %>'), or None."""
     for line in text.splitlines():
@@ -174,12 +188,14 @@ def parse_meta(text):
     for line in text.splitlines():
         parts = line.split()
         try:
-            if parts[0] == "T" and len(parts) == 15:
+            if parts[0] == "T" and len(parts) in (15, 19):
                 status = {"seq": int(parts[1]), "t_ms": float(parts[2]), "found": parts[3] == "1",
                           "cx": float(parts[4]), "cy": float(parts[5]), "w": float(parts[6]), "h": float(parts[7]),
                           "confidence": float(parts[8]), "state": parts[9], "armed": parts[10] == "1",
                           "shots": int(parts[11]), "link": parts[12] == "1", "proc_us": float(parts[13]),
-                          "scan_pan": float(parts[14])}
+                          "scan_pan": float(parts[14]),
+                          "gate": len(parts) == 19 and parts[15] == "1", "human": len(parts) == 19 and parts[16] == "1",
+                          "ai_ok": len(parts) == 19 and parts[17] == "1", "face_ms": float(parts[18]) if len(parts) == 19 else -1.0}
             elif parts[0] == "E" and len(parts) >= 3:
                 events.append((float(parts[1]), " ".join(parts[2:])))
         except (ValueError, IndexError):
@@ -242,6 +258,7 @@ class FrameFeed:
         self.camera, self.camera_at = None, 0.0       # the Pi's report on its camera (None until it says something)
         self.pi_video, self.pi_video_at = None, 0.0   # the Pi's own video measurements (rate, size, encode time, CPU)
         self.pi_system, self.pi_system_at = None, 0.0  # the Pi's system report (CPU, memory, programs, priorities)
+        self.faces, self.faces_at = None, 0.0          # the AI face program's newest report (count, ms, boxes)
         self.proc_log = deque(maxlen=900)             # (arrival time, tracker processing time in ms) per answer: the control loop's timing
         self._arrivals = deque(maxlen=600)            # (arrival time, bytes, delay in ms or None) of each picture at THIS end of the Wi-Fi
         self._offsets = deque(maxlen=40)              # (round trip s, laptop clock minus Pi clock s) from the UDP pings
@@ -278,6 +295,9 @@ class FrameFeed:
         ps = parse_system(text)
         if ps:
             self.pi_system, self.pi_system_at = ps, time.time()
+        fc = parse_faces(text)
+        if fc:
+            self.faces, self.faces_at = fc, time.time()
         now = time.time()
         stamp = parse_stamp(text)
         if stamp is not None:

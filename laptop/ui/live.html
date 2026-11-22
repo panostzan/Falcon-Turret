@@ -17,6 +17,7 @@
       <div id="badge" class="badge">Connecting…</div>
       <div id="flash" class="flash"></div>
       <div id="fired" class="fired" hidden></div>
+      <div id="humanbanner" class="humanbanner" hidden></div>
       <div id="nosignal" class="nosignal" hidden><b>NO CAMERA SIGNAL</b><span id="nosignal-why"></span></div>
     </div>
     <div class="layers" id="layers" role="group" aria-label="Layers"></div>
@@ -76,6 +77,7 @@
         <button id="arm" class="hold" title="Hold to arm">Hold to arm</button>
         <button id="scan" aria-pressed="false">Auto-scan</button>
         <button id="fire" class="danger" disabled title="Fires once. Only works while armed.">Fire</button>
+        <button id="hgate" aria-pressed="false" title="With the face check on, firing is disabled while a human is in view">Face check</button>
       </div>
       <p class="hint" id="shots">Shots 0 of 30 (simulated: no emitter yet)</p>
     </div>
@@ -189,6 +191,7 @@ function showFired(n) {
   clearTimeout(firedTimer); firedTimer = setTimeout(() => { t.hidden = true; }, 1200);
 }
 $('fire').onclick = fire;
+$('hgate').onclick = () => api.post('/humangate?on=' + (S && S.qnx && S.qnx.gate ? 0 : 1));
 document.querySelector('.stage').addEventListener('click', fire);
 document.addEventListener('keydown', e => {
   if (e.key === ' ' && !['INPUT', 'TEXTAREA', 'BUTTON', 'SELECT'].includes(document.activeElement.tagName)) { e.preventDefault(); fire(); }
@@ -304,7 +307,11 @@ function render(s) {
   const shots = e.shots || 0;
   if (prevShots !== null && shots > prevShots) showFired(shots);
   prevShots = shots;
-  $('fire').disabled = !e.armed;
+  const hgate = !!q.gate, hok = !!q.ai_ok, humanMsg = hgate && !hok ? 'Ability to fire disabled: face check offline' : hgate && q.human ? 'Ability to fire disabled: human detected' : '';
+  pressed($('hgate'), hgate);
+  $('hgate').textContent = hgate ? (hok ? `Face check on · ${q.face_ms >= 0 ? Math.round(q.face_ms) + ' ms' : 'running'}` : 'Face check on · offline') : 'Face check';
+  $('humanbanner').hidden = !humanMsg; $('humanbanner').textContent = humanMsg;
+  $('fire').disabled = !e.armed || !!humanMsg;
   $('shots').textContent = e.armed ? `Shots ${shots} of ${e.max_shots || 30} · click the picture, press Space or Fire` : `Shots ${shots} of ${e.max_shots || 30} · arm to enable Fire`;
 
   $('pan').textContent = s.angles ? s.angles[0] : '–'; $('tilt').textContent = s.angles ? s.angles[1] : '–';

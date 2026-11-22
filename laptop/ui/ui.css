@@ -79,7 +79,9 @@ b, strong { font-weight: 400; }
 .flash { position: absolute; inset: 0; z-index: 5; background: #fff; opacity: 0; pointer-events: none; }
 .flash.go { animation: flash .4s ease-out; }
 @keyframes flash { from { opacity: .65; } to { opacity: 0; } }
-.fired { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 6; padding: 4px 16px; background: var(--alarm); color: #fff; font-size: 16px; }
+.humanbanner { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 6; padding: 6px 18px; background: var(--alarm); color: #fff; font-size: 16px; white-space: nowrap; }
+.humanbanner[hidden] { display: none; }
+.fired { position: absolute; left: 50%; top: 58px; transform: translateX(-50%); z-index: 6; padding: 4px 16px; background: var(--alarm); color: #fff; font-size: 16px; }
 .fired[hidden] { display: none; }          /* the display above would otherwise win over the hidden attribute */
 .nosignal b { font-size: 24px; color: var(--alarm); }
 .nosignal span { color: var(--text); max-width: 460px; }

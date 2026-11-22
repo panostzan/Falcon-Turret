@@ -436,7 +436,8 @@ def qnx_summary():
            "rtt": f.rtt() if (f and hasattr(f, "rtt")) else {}, "udp": bool(f and getattr(f, "udp_answers", 0))}
     if m:
         out.update(state=m["state"], armed=m["armed"], shots=m["shots"], link=m["link"], proc_ms=round(m["proc_us"] / 1000, 1),
-                   age_ms=round((time.time() - f.meta_at) * 1000))
+                   age_ms=round((time.time() - f.meta_at) * 1000), gate=m.get("gate", False), human=m.get("human", False),
+                   ai_ok=m.get("ai_ok", False), face_ms=m.get("face_ms", -1.0))
         age_s = time.time() - f.meta_at                   # both clocks below are the Pi's, so the difference is exact
         out["events"] = [[round(max(0.0, (m["t_ms"] - t) / 1000.0) + age_s, 1), text] for t, text in f.events[-8:]]
     return out
@@ -504,6 +505,29 @@ def log_tracking_change(found, qnx, conf, now):
         pass
 
 
+def fresh_faces():
+    """The AI face program's newest report if it is under 1.5 s old, else None."""
+    f = feed_ref["feed"]
+    fc = getattr(f, "faces", None) if f else None
+    return fc if (fc and time.time() - getattr(f, "faces_at", 0.0) < 1.5) else None
+
+
+def draw_faces(frame, faces):
+    """A box around every face the AI found (the QNX face program reports them as fractions of the picture)."""
+    if not faces or not faces["boxes"]:
+        return
+    h, w = frame.shape[:2]
+    colour = (77, 72, 229) if engage.human_gate else (230, 230, 230)          # BGR: red while the face check is on, else white
+    for cx, cy, bw, bh, score in faces["boxes"]:
+        if view["mirror"]:
+            cx = 1.0 - cx
+        if view["vflip"]:
+            cy = 1.0 - cy
+        x0, y0, x1, y1 = int((cx - bw / 2) * w), int((cy - bh / 2) * h), int((cx + bw / 2) * w), int((cy + bh / 2) * h)
+        cv2.rectangle(frame, (x0, y0), (x1, y1), colour, 2)
+        cv2.putText(frame, f"face {score:.2f}", (x0, max(14, y0 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 1, cv2.LINE_AA)
+
+
 def apply_depth(frame, dmap):
     """Lay the depth heatmap over the picture when the Depth layer is on."""
     return depth_overlay(frame, dmap, stale=depth_state["stale"]) if (view["depth"] and dmap is not None) else frame
@@ -564,7 +588,7 @@ def draw_ghost(frame, lost):
 def process(jpg, ts=None):
     """Apply the view flips and, if a target is armed, find it, aim, and draw. Returns (JPEG, found flag)."""
     now = time.time() if ts is None else ts
-    if not (view["mirror"] or view["vflip"] or view["depth"] or view["depthcheck"] or tracker.armed):
+    if not (view["mirror"] or view["vflip"] or view["depth"] or view["depthcheck"] or tracker.armed or fresh_faces()):
         engage.update(now, False, False, False)
         return jpg, False                # nothing to change: the Pi's JPEG goes straight to the browser
     frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
@@ -594,6 +618,7 @@ def process(jpg, ts=None):
         send_pi(f"min_conf {int(engage.min_confidence * 100)}")
         send_pi(f"auto_scan {1 if engage.auto_scan else 0}")
         send_pi(f"autofire {1 if engage.auto_fire else 0}")
+        send_pi(f"humangate {1 if engage.human_gate else 0}")
     roof_observe(now, bool(face) and tracker.confidence >= engage.min_confidence)   # a sure sighting wakes a dormant roof
     dmap = depth_map(frame)                          # also None when neither the Depth layer nor the depth check is on
     if face and dmap is not None:
@@ -656,6 +681,7 @@ def process(jpg, ts=None):
     if scan_goal and tracking and ctl["aimer"] and roof_ready():      # auto-scan: sweep while searching (only with the roof open)
         with ctl_lock:
             ctl["angles"] = ctl["aimer"].gimbal.move_to(*scan_goal)
+    draw_faces(frame, fresh_faces())
     return cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tobytes(), found
 
 
@@ -879,6 +905,10 @@ class Handler(BaseHTTPRequestHandler):
             if r is not None:
                 r.set_hibernate(on, time.time())
             return self._send(json.dumps(roof_summary()).encode())
+        if url.path == "/humangate":
+            engage.human_gate = q.get("on", ["0"])[0] == "1"
+            send_pi(f"humangate {1 if engage.human_gate else 0}")
+            return self._send(b"{}")
         if url.path == "/fire":
             if not roof_ready():
                 return self._send(json.dumps({"via": "laptop", "refused": roof_block_reason()}).encode())

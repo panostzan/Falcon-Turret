@@ -37,6 +37,8 @@ class Engagement:
         self.armed = False
         self.auto_scan = False
         self.auto_fire = True                     # shoot by itself on LOCK; False = only on a manual fire()
+        self.human_gate = False                   # the human gate: with it on, no shot while a human is in view or the AI check is silent
+        self.human, self.human_ts, self.human_timeout_s = False, None, 2.0
         self.shots = 0
         self.events = deque(maxlen=80)            # (time, text) newest last
         self.state = "IDLE"
@@ -63,10 +65,28 @@ class Engagement:
             if on:
                 self.shots = 0
 
+    def set_human(self, present, ts):
+        """The AI's latest answer (True = a human is in view). Logs HUMAN detected / cleared when it changes."""
+        present = bool(present)
+        if present != self.human and self.human_ts is not None:
+            self.events.append((ts, "HUMAN detected" if present else "HUMAN cleared"))
+        elif present and self.human_ts is None:
+            self.events.append((ts, "HUMAN detected"))
+        self.human, self.human_ts = present, ts
+
+    def human_block(self, ts):
+        """Why the human gate forbids a shot right now: "human detected", "face check offline" (the AI has not reported within
+        human_timeout_s), or None. Always None with the gate off."""
+        if not self.human_gate:
+            return None
+        if self.human_ts is None or ts - self.human_ts > self.human_timeout_s:
+            return "face check offline"
+        return "human detected" if self.human else None
+
     def fire(self, ts):
         """A manual shot (the operator's click). Allowed only when armed and tracking, outside the cooldown and under max_shots;
         needs no lock. Returns None when it fired, else the reason it was refused (also logged)."""
-        reason = (None if self.armed else "not armed") or ("tracking off" if self.state == "IDLE" else None)             or ("cooldown" if ts < self._cooldown_until else None)             or ("shot limit" if self.shots >= self.max_shots else None)
+        reason = (None if self.armed else "not armed") or ("tracking off" if self.state == "IDLE" else None)             or self.human_block(ts) or ("cooldown" if ts < self._cooldown_until else None)             or ("shot limit" if self.shots >= self.max_shots else None)
         if reason:
             self.events.append((ts, f"FIRE refused: {reason}"))
             return reason
@@ -115,7 +135,7 @@ class Engagement:
                 if self._settled == 0 or speed > self.max_speed:
                     self._to("TRACK", ts, "lock broken")
                     self._lock_since = None
-                elif (self.armed and self.auto_fire and self.shots < self.max_shots and self._lock_since is not None
+                elif (self.armed and self.auto_fire and self.human_block(ts) is None and self.shots < self.max_shots and self._lock_since is not None
                       and ts - self._lock_since >= self.dwell_s):
                     self.emitter.fire(ts)
                     self.shots += 1

@@ -14,6 +14,7 @@ void engage_defaults(EngageConfig *c)
     c->acquire_frames = 3; c->lock_frames = 8; c->max_shots = 30;
     c->dwell_s = 0.5; c->cooldown_s = 1.5; c->lost_s = 1.0; c->max_speed = 300.0; c->min_confidence = 0.8;
     c->scan_lo = 50.0; c->scan_hi = 130.0; c->scan_speed = 25.0; c->scan_tilt = 135.0;
+    c->human_timeout_s = 2.0;
 }
 
 static void note(Engage *e, double ts, const char *text)
@@ -71,10 +72,29 @@ static void scan_goal(Engage *e, double ts, ScanGoal *g)
     g->tilt = e->cfg.scan_tilt;
 }
 
+void engage_set_human(Engage *e, int present, double ts)
+{
+    present = present != 0;
+    if (present != e->human && e->human_ts > 0.0) note(e, ts, present ? "HUMAN detected" : "HUMAN cleared");
+    else if (present && e->human_ts == 0.0) note(e, ts, "HUMAN detected");
+    e->human = present;
+    e->human_ts = ts > 0.0 ? ts : 1e-9;
+}
+
+FireResult engage_human_block(const Engage *e, double ts)
+{
+    if (!e->human_gate) return FIRE_OK;
+    if (e->human_ts == 0.0 || ts - e->human_ts > e->cfg.human_timeout_s) return FIRE_AI_STALE;
+    return e->human ? FIRE_HUMAN : FIRE_OK;
+}
+
 FireResult engage_fire(Engage *e, double ts)
 {
     if (!e->armed) { note(e, ts, "FIRE refused: not armed"); return FIRE_NOT_ARMED; }
     if (e->state == ENGAGE_IDLE) { note(e, ts, "FIRE refused: tracking off"); return FIRE_NOT_TRACKING; }
+    FireResult hb = engage_human_block(e, ts);
+    if (hb == FIRE_HUMAN) { note(e, ts, "FIRE refused: human detected"); return FIRE_HUMAN; }
+    if (hb == FIRE_AI_STALE) { note(e, ts, "FIRE refused: face check offline"); return FIRE_AI_STALE; }
     if (ts < e->cooldown_until) { note(e, ts, "FIRE refused: cooldown"); return FIRE_COOLDOWN; }
     if (e->shots >= e->cfg.max_shots) { note(e, ts, "FIRE refused: shot limit"); return FIRE_LIMIT; }
     char text[40];
@@ -129,7 +149,7 @@ int engage_update(Engage *e, double ts, int tracking, int found, int settled, do
             if (e->settled == 0 || speed > c->max_speed) {
                 to_state(e, ENGAGE_TRACK, ts, "lock broken");
                 e->have_lock_since = 0;
-            } else if (e->armed && e->auto_fire && e->shots < c->max_shots && e->have_lock_since && ts - e->lock_since >= c->dwell_s) {
+            } else if (e->armed && e->auto_fire && engage_human_block(e, ts) == FIRE_OK && e->shots < c->max_shots && e->have_lock_since && ts - e->lock_since >= c->dwell_s) {
                 e->shots++;
                 fired = 1;
                 {

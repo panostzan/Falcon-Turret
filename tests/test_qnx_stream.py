@@ -48,6 +48,15 @@ def test_parse():
     assert status["cx"] == 345.0 and status["confidence"] == 0.912 and status["proc_us"] == 7693 and status["link"]
     assert events == [(4990.0, "ARMED"), (5000.0, "FIRE #1")], events     # the garbled lines were skipped, not fatal
     assert receiver.parse_meta("") == (None, [])
+    # the longer status line from a turretd that has the human gate: gate human ai_ok face_ms at the end
+    status, _ = receiver.parse_meta(T_LINE + " 1 1 1 14")
+    assert status["gate"] is True and status["human"] is True and status["ai_ok"] is True and status["face_ms"] == 14.0, status
+    status, _ = receiver.parse_meta(T_LINE + " 1 0 0 -1")
+    assert status["gate"] and not status["human"] and not status["ai_ok"] and status["face_ms"] == -1.0
+    assert receiver.parse_meta(T_LINE)[0]["gate"] is False, "the older line (no AI fields) still parses"
+    faces = receiver.parse_faces("noise" + chr(10) + "FACE 2 13.5 0.5 0.4 0.2 0.3 0.93 0.2 0.6 0.1 0.15 0.71")
+    assert faces["n"] == 2 and faces["ms"] == 13.5 and faces["boxes"] == [(0.5, 0.4, 0.2, 0.3, 0.93), (0.2, 0.6, 0.1, 0.15, 0.71)], faces
+    assert receiver.parse_faces("FACE 0 9.0")["boxes"] == [] and receiver.parse_faces("FACE x y") is None and receiver.parse_faces("") is None
     print("meta parsing ok")
 
 
