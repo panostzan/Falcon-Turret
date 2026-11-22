@@ -432,8 +432,6 @@ def process(jpg, ts=None):
         if view["mask"] and tracker.debug_mask is not None:   # tint every pixel the color filter accepts
             hit = cv2.resize(tracker.debug_mask, (w, h), interpolation=cv2.INTER_NEAREST) > 0
             frame[hit] = (0.4 * frame[hit] + 0.6 * np.array((255, 0, 255))).astype(np.uint8)
-        if view["box"]:
-            cv2.drawMarker(frame, (w // 2, h // 2), (255, 255, 255), cv2.MARKER_CROSS, 20, 1)
         if face:
             found = True
             cx, cy, fw, fh = face
