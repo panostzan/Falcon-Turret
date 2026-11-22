@@ -167,6 +167,26 @@ class ColorTracker:
                            "steady": round(steady, 2), "seen": round(seen, 2)}
         self.confidence = round(seen * (0.3 * fill + 0.25 * size + 0.25 * unique + 0.2 * steady), 3)
 
+    def focus_depth_from_box(self, depth01, box, frame_shape):
+        """Record the target's depth from a box found elsewhere (the QNX tracker reports only a box, no colour mask). Uses the
+        middle half of the box, which is mostly target. Smoothed like check_depth's. Needs only the depth map; it never changes
+        the confidence (on QNX the Pi's confidence is final)."""
+        if depth01 is None:
+            return
+        fh, fw = frame_shape[:2]
+        dh, dw = depth01.shape[:2]
+        cx, cy, bw, bh = box
+        x0, x1 = max(0.0, cx - bw / 4), min(float(fw), cx + bw / 4)
+        y0, y1 = max(0.0, cy - bh / 4), min(float(fh), cy + bh / 4)
+        sx, sy = dw / fw, dh / fh
+        ix0, iy0 = int(x0 * sx), int(y0 * sy)
+        ix1, iy1 = max(ix0 + 1, int(x1 * sx)), max(iy0 + 1, int(y1 * sy))
+        patch = depth01[iy0:iy1, ix0:ix1]
+        if patch.size < 4:
+            return
+        med = float(np.median(patch))
+        self.depth_focus = med if self.depth_focus is None else 0.7 * self.depth_focus + 0.3 * med
+
     def check_depth(self, depth01):
         """Lower the confidence if the depth map disagrees with the match. `depth01` is the relative depth (0 far,
         1 near), aligned with the picture the tracker just searched. Uses only the target's own color pixels:

@@ -426,7 +426,11 @@ def process(jpg, ts=None):
         send_pi(f"min_conf {int(engage.min_confidence * 100)}")
         send_pi(f"auto_scan {1 if engage.auto_scan else 0}")
     dmap = depth_map(frame)                          # also None when neither the Depth layer nor the depth check is on
-    if face and dmap is not None:
+    if qs is not None:                                        # QNX tracks: the laptop tracker is not run, so keep its depth and miss count current here
+        tracker.missed = 0 if face else tracker.missed + 1
+        if face and dmap is not None:
+            tracker.focus_depth_from_box(dmap, face, frame.shape)
+    elif face and dmap is not None:
         tracker.check_depth(dmap)
     frame = apply_cutout(frame, dmap)
     frame = apply_depth(frame, dmap)

@@ -65,6 +65,21 @@ def test():
     t3.clear()
     assert t3.blob is None
     t3.check_depth(depth_flat(0.5))                          # nothing tracked: harmless
+
+    # QNX tracking gives only a box (no colour mask): the depth must still be recorded, from the middle of the box
+    t4 = ColorTracker()
+    d = np.full((224, 308), 0.2, np.float32)                 # a far background ...
+    d[84:140, 150:200] = 0.8                                  # ... with a near object where the box is (frame 640x480 -> depth 308x224)
+    box = (330.0, 240.0, 80.0, 80.0)                          # cx, cy, w, h in the 640x480 frame
+    t4.focus_depth_from_box(d, box, (480, 640))
+    assert t4.depth_focus is not None and abs(t4.depth_focus - 0.8) < 0.05, t4.depth_focus
+    conf_before = t4.confidence
+    for _ in range(10):
+        t4.focus_depth_from_box(d, box, (480, 640))
+    assert abs(t4.depth_focus - 0.8) < 0.05 and t4.confidence == conf_before, "depth is recorded; confidence is not touched"
+    t4.focus_depth_from_box(None, box, (480, 640))            # no depth map: harmless
+    t4.focus_depth_from_box(d, (5.0, 5.0, 2.0, 2.0), (480, 640))   # a tiny box in a corner: harmless
+    assert t4.depth_focus is not None
     print("depth-aware confidence tests passed")
 
 
