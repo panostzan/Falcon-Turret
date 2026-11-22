@@ -30,7 +30,7 @@ def test():
         assert "ARM" in classic and "/telemetry" in classic and "Mission" in classic
         live, diag = call(port, "/").decode(), call(port, "/diagnostics").decode()
         assert "Mission" in live and "Hold to arm" in live and "/ui.js" in live
-        assert "/telemetry" in diag and "Event log" in diag
+        assert "/telemetry" in diag and "Recent events" in diag
         assert b"--teal" in call(port, "/ui.css") and b"function poll" in call(port, "/ui.js")
         sysinfo = json.loads(call(port, "/system"))
         assert sysinfo["uptime_s"] >= 0 and "python" in sysinfo
