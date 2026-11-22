@@ -66,6 +66,8 @@ class Brain:
         self._cv = threading.Condition()
         self._frame = None
         self._out = []
+        self._gen = 0                # how many status lines turretd has produced so far
+        self._last_t_at = 0.0        # when the newest one arrived
         if not os.path.exists(TURRETD):
             return
         subprocess.call(["slay", "-f", "turretd"], stderr=subprocess.DEVNULL)
@@ -80,11 +82,14 @@ class Brain:
             threading.Thread(target=target, daemon=True).start()
 
     def submit(self, raw):
-        """Hand over the newest picture; never waits (an older picture that was not taken yet is replaced)."""
-        if self.ok:
-            with self._cv:
-                self._frame = raw
-                self._cv.notify()
+        """Hand over the newest picture; never waits (an older picture that was not taken yet is replaced).
+        Returns a marker for take(): turretd's answer to THIS picture is the first one after it."""
+        if not self.ok:
+            return 0
+        with self._cv:
+            self._frame = raw
+            self._cv.notify_all()
+            return self._gen
 
     def _write_frames(self):
         while True:
@@ -100,21 +105,40 @@ class Brain:
     def _read_lines(self):
         for line in iter(self.proc.stdout.readline, b""):
             with self._cv:
-                self._out.append(line.decode(errors="replace").rstrip())
+                text = line.decode(errors="replace").rstrip()
+                self._out.append(text)
                 del self._out[:-300]
+                if text.startswith("T "):
+                    self._gen += 1
+                    self._last_t_at = time.time()
+                    self._cv.notify_all()
 
     def _forward_control(self):
         """Lines from the laptop (over SSH) go to turretd. When the laptop goes away they stop, and turretd's own
         watchdog disarms the turret."""
-        for line in iter(sys.stdin.buffer.readline, b""):
+        buf = b""
+        while True:
             try:
-                self.sock.sendto(line, CONTROL)
+                chunk = os.read(0, 4096)          # the raw descriptor: no buffered-reader lock to trip over at shutdown
             except OSError:
-                pass
+                return
+            if not chunk:
+                return
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                try:
+                    self.sock.sendto(line + b"\n", CONTROL)
+                except OSError:
+                    pass
 
-    def take(self):
-        """Everything turretd said since the last call, reduced to its newest status line and all its events."""
+    def take(self, after=None, wait=0.0):
+        """Everything turretd said since the last call, reduced to its newest status line and all its events.
+        With `after` (from submit) it first waits up to `wait` seconds for the answer to that picture, so the status that
+        travels with a JPEG describes that JPEG and not the one before. It does not wait if turretd has gone quiet."""
         with self._cv:
+            if wait > 0 and after is not None and time.time() - self._last_t_at < 0.5:
+                self._cv.wait_for(lambda: self._gen > after, timeout=wait)
             lines, self._out = self._out, []
         status = [l for l in lines if l.startswith("T ")][-1:]
         return [l for l in lines if l.startswith("E ")] + status
@@ -195,9 +219,9 @@ def main():
             if n > last:
                 raw = cur.read(n)
                 if len(raw) == FRAME:
-                    brain.submit(raw)
-                    jpg = encode(raw)
-                    said = brain.take() if brain.ok else []
+                    marker = brain.submit(raw)
+                    jpg = encode(raw)                       # turretd works on the same picture while this runs
+                    said = brain.take(marker, 0.02) if brain.ok else []
                     if said:
                         text = "\n".join(said).encode()
                         out.write(struct.pack("<I", META_FLAG | len(text)) + text)

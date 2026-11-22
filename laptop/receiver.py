@@ -180,8 +180,8 @@ class FrameFeed:
             self.send("hb")
             time.sleep(0.2)
 
-    def qnx_fresh(self, max_age=0.6):
-        """The newest turretd status if it is recent, else None."""
+    def qnx_fresh(self, max_age=0.3):
+        """The newest turretd status if it is recent (about 4 pictures), else None: then the laptop tracker takes over."""
         return self.meta if (self.meta and time.time() - self.meta_at < max_age) else None
 
     def _run(self, quality):
