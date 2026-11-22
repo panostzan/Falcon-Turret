@@ -251,6 +251,16 @@ def test_app():
     assert any(l.startswith("aim ") for l in ff.sent)
     assert app.qnx_summary()["used"] and app.qnx_summary()["state"] == "TRACK"
 
+    teal = np.full((480, 640, 3), 90, np.uint8)
+    cv2.rectangle(teal, (300, 200), (380, 280), (170, 170, 20), -1)
+    teal_jpg = cv2.imencode(".jpg", teal)[1].tobytes()
+    app.view["mask"] = True                                # Color match layer on while QNX tracks: the mask must still be produced
+    app.tracker.debug_mask = None
+    out, found = app.process(teal_jpg, 100.01)
+    assert found and app.tracker.debug_mask is not None and app.tracker.debug_mask.any(), "Color match works under QNX tracking"
+    assert app.tracker.confidence == 0.9, "and the confidence is still QNX's"
+    app.view["mask"] = False
+
     small = cv2.imencode(".jpg", np.full((360, 480, 3), 90, np.uint8))[1].tobytes()     # the dashboard picture can be 480x360
     ff.meta = meta(cx=320.0, cy=240.0, w=80.0, h=60.0)                                   # the Pi reports in its 640x480 picture
     app.view["mirror"] = False

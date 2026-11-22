@@ -43,7 +43,7 @@
 
     <div class="panel">
       <h2>Confidence</h2>
-      <div class="meter" id="meter"><i id="meter-fill"></i><u id="meter-need"></u></div>
+      <div class="meter" id="meter" title="Drag to set the confidence needed to lock and fire"><i id="meter-fill"></i><u id="meter-need"><span id="need-tip"></span></u></div>
       <div class="row" style="justify-content:space-between"><b id="conf-pct" class="big">–</b><small id="conf-note">No target</small></div>
       <small id="conf-parts"></small>
     </div>
@@ -90,8 +90,6 @@
           <button id="fadestale" aria-pressed="false" title="Experimental: fades the depth where the picture moved since it was computed. Can look patchy.">Hide stale depth</button>
           <button id="smooth" aria-pressed="true" title="Glides between depth results, averages flicker, follows camera motion">Smooth depth</button>
         </div>
-        <label>Confidence needed to lock and fire: <b id="needv">80%</b>
-          <input id="need" type="range" min="50" max="100" step="5" value="80"></label>
         <label>Look ahead of a moving target: <b id="leadv">0 ms</b>
           <input id="lead" type="range" min="0" max="800" step="25" value="0"></label>
       </details>
@@ -180,8 +178,16 @@ $('dcheck').onclick = () => setView('depthcheck', !(S && S.view && S.view.depthc
 $('fadestale').onclick = () => setView('fadestale', !(S && S.view && S.view.fadestale));
 $('smooth').onclick = () => setView('smooth', !(S && S.view && S.view.smooth));
 $('vflip').onclick = () => setView('vflip', !(S && S.view && S.view.vflip));
-$('need').oninput = e => { $('needv').textContent = e.target.value + '%'; };
-$('need').onchange = e => api.post('/cfg?min_conf=' + e.target.value);
+/* The meter is the slider: drag anywhere on it to move the white tick (the confidence needed to lock and fire). The value shows only while dragging. */
+const meterEl = $('meter');
+let dragging = false, needLive = null;
+const needFrom = e => { const r = meterEl.getBoundingClientRect(); return Math.max(50, Math.min(100, Math.round((e.clientX - r.left) / r.width * 20) * 5)); };
+const setNeed = v => { needLive = v; $('meter-need').style.left = v + '%'; $('need-tip').textContent = v + '%'; };
+meterEl.addEventListener('pointerdown', e => { dragging = true; meterEl.setPointerCapture(e.pointerId); meterEl.classList.add('drag'); setNeed(needFrom(e)); });
+meterEl.addEventListener('pointermove', e => { if (dragging) setNeed(needFrom(e)); });
+const endDrag = () => { if (!dragging) return; dragging = false; meterEl.classList.remove('drag'); api.post('/cfg?min_conf=' + needLive); };
+meterEl.addEventListener('pointerup', endDrag);
+meterEl.addEventListener('pointercancel', endDrag);
 $('lead').oninput = e => { $('leadv').textContent = e.target.value + ' ms'; };
 $('lead').onchange = e => api.post('/cfg?lead_ms=' + e.target.value);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { api.post('/track?on=0'); api.post('/arm?on=0'); } });
@@ -201,14 +207,13 @@ function render(s) {
 
   pressed($('p-teal'), s.preset === 'teal'); pressed($('p-blue'), s.preset === 'blue'); pressed($('p-clear'), !s.armed);
   $('tsel').textContent = 'Target: ' + ({ teal: 'teal', blue: 'blue' }[s.preset] || 'none');
-  const pct = Math.round((s.confidence || 0) * 100), need = Math.round((s.min_confidence || 0.8) * 100), sure = s.target && pct >= need;
+  const pct = Math.round((s.confidence || 0) * 100), need = dragging ? needLive : Math.round((s.min_confidence || 0.8) * 100), sure = s.target && pct >= need;
   $('meter-fill').style.width = pct + '%'; $('meter-need').style.left = need + '%';
-  $('meter').className = 'meter ' + (!s.target ? '' : sure ? 'sure' : 'unsure');
+  meterEl.classList.toggle('sure', !!(s.target && sure)); meterEl.classList.toggle('unsure', !!(s.target && !sure));
   $('conf-pct').textContent = s.target ? pct + '%' : '–';
   $('conf-note').textContent = !s.target ? 'No target' : sure ? 'Sure enough to engage' : 'Not sure: will not lock or fire';
   const cp = s.conf_parts || {};
   $('conf-parts').textContent = s.target ? `solid ${Math.round(cp.fill * 100)} · size ${Math.round(cp.size * 100)} · alone ${Math.round(cp.unique * 100)} · steady ${Math.round(cp.steady * 100)} · seen ${Math.round(cp.seen * 100)}` + (cp.depth != null ? ` · depth ${Math.round(cp.depth * 100)}` : '') : '';
-  if (s.cfg && document.activeElement !== $('need')) { $('need').value = s.cfg.min_conf; $('needv').textContent = s.cfg.min_conf + '%'; }
   const lost = s.lost, P = s.perception, e2 = s.engage || {};
   const showBox = s.armed && P && P !== 'TRACKING';
   $('lostbox').hidden = !showBox;

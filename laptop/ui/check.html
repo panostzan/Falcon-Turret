@@ -41,32 +41,32 @@
   <div class="box">
     <div class="go">
       <button id="run">Run system check</button>
-      <label><input type="checkbox" id="wiggle"> Wiggle the servos (moves each a few degrees; keep hands clear)</label>
+      <label><input type="checkbox" id="wiggle"> Actuate servos (pan 6°, tilt 4°, lift 6°; keep clear)</label>
     </div>
-    <div class="overall" id="overall"><div class="big">Not run yet</div><small>Takes about 5 seconds, 10 with the servo wiggle. Nothing moves unless the box is ticked.</small></div>
+    <div class="overall" id="overall"><div class="big">Not run</div><small>7 checks, about 5 s (10 s with servo actuation). No actuation unless enabled.</small></div>
     <ul class="rows" id="rows"></ul>
-    <p class="hint">Green: working. Amber: works, but look at it. Red: broken, with what to do. Hollow: skipped.</p>
+    <p class="hint">Pass · Warning · Fault · Skipped</p>
   </div>
 </main>
 
 <script src="/ui.js"></script>
 <script>
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-const WORDS = { pass: 'All systems go', warn: 'Works, with warnings', fail: 'Something is broken' };
+const WORDS = { pass: 'Pass', warn: 'Warning', fail: 'Fault' };
 
 async function run() {
-  const btn = $('run'); btn.disabled = true; btn.textContent = 'Checking…';
-  $('overall').className = 'overall'; $('overall').innerHTML = '<div class="big">Checking…</div><small>Asking every part to answer.</small>';
+  const btn = $('run'); btn.disabled = true; btn.textContent = 'Running…';
+  $('overall').className = 'overall'; $('overall').innerHTML = '<div class="big">Running</div><small>Probing link, camera, tracker, interlock, servo driver, host</small>';
   try {
     const r = await (await fetch('/syscheck?wiggle=' + ($('wiggle').checked ? 1 : 0), { method: 'POST' })).json();
     const s = r.summary;
     $('overall').className = 'overall ' + s.verdict;
-    $('overall').innerHTML = `<div class="big">${WORDS[s.verdict]}</div><small>${s.pass} working, ${s.warn} warnings, ${s.fail} broken, ${s.skip} skipped. Took ${r.seconds} s.</small>`;
+    $('overall').innerHTML = `<div class="big">${WORDS[s.verdict]}</div><small>${s.pass} pass, ${s.warn} warning, ${s.fail} fault, ${s.skip} skipped · ${r.seconds} s</small>`;
     $('rows').innerHTML = r.rows.map(x => `<li class="${x.state}"><span class="dot"></span><b>${esc(x.name)}</b><span class="d">${esc(x.detail)}${x.fix && x.state !== 'pass' ? `<span class="fix">${esc(x.fix)}</span>` : ''}</span></li>`).join('');
   } catch (e) {
-    $('overall').className = 'overall fail'; $('overall').innerHTML = '<div class="big">Server not reachable</div><small>Start the dashboard server and try again.</small>';
+    $('overall').className = 'overall fail'; $('overall').innerHTML = '<div class="big">No server</div><small>Dashboard server unreachable</small>';
   }
-  btn.disabled = false; btn.textContent = 'Run system check again';
+  btn.disabled = false; btn.textContent = 'Run again';
 }
 $('run').onclick = run;
 poll('/state', 1000, setStatus);

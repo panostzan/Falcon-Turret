@@ -83,7 +83,7 @@ def check_feather(env):
 
 def check_wiggle(env, wiggle):
     if not wiggle:
-        return _row("Servos", SKIP, "not tested (tick \"Wiggle the servos\" to test them)")
+        return _row("Servos", SKIP, "not run (servo actuation disabled)")
     if env["tracking"]():
         return _row("Servos", SKIP, "tracking is on", "Switch tracking off first so the check can move them.")
     try:
@@ -98,7 +98,7 @@ def check_wiggle(env, wiggle):
             for target in (base + delta, base - delta, base):
                 g.move_to(**{axis: target})
                 time.sleep(0.25)
-        return _row("Servos", PASS, "pan, tilt and lift each moved a few degrees and returned. Did you see all three move?",
+        return _row("Servos", PASS, "pan, tilt, lift actuated and returned; commands acknowledged (confirm motion by eye)",
                     "If one did not move: check that channel's servo plug and the servo power supply.")
     except Exception as e:
         return _row("Servos", FAIL, f"a move failed: {str(e)[:80]}", "Check the Feather's USB cable.")

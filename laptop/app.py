@@ -387,6 +387,8 @@ def process(jpg, ts=None):
     found = False
     qs = qnx_status() if tracker.armed else None
     if qs is not None:                                        # the answer came from the tracker running on QNX
+        if view["mask"]:
+            tracker.find(frame)                               # QNX reports only a box: the Color match layer needs the laptop's own colour mask
         fh, fw = frame.shape[:2]
         sx, sy = fw / SRC_W, fh / SRC_H                   # the Pi reports in its 640x480 picture; the one we draw on may be smaller
         face = None
