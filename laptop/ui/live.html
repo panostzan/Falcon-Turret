@@ -7,7 +7,7 @@
 <header class="top">
   <div class="brand">Turret</div>
   <nav class="tabs"><a href="/" aria-current="page">Live</a><a href="/diagnostics">Diagnostics</a></nav>
-  <div class="status"><span id="st-video">Connecting…</span><span id="st-gimbal"></span><span id="st-depth"></span></div>
+  <div class="status"><span id="st-video">Connecting…</span><span id="st-gimbal"></span><span id="st-depth"></span><span id="st-qnx"></span></div>
 </header>
 
 <main class="layout">
@@ -60,7 +60,7 @@
     </div>
 
     <div class="panel">
-      <h2>Mission</h2>
+      <h2>Mission <small id="mission-src"></small></h2>
       <ol class="stepper" id="stepper"></ol>
       <div class="row">
         <button id="arm" class="hold" title="Hold to arm">Hold to arm</button>
@@ -84,7 +84,8 @@
           <button id="center">Center</button>
         </div>
         <div class="row">
-          <button id="mirror" aria-pressed="true">Mirror</button>
+          <button id="qnxon" aria-pressed="true" title="Use the tracker and fire interlock running on QNX (only for the Teal and Blue targets)">Tracker on QNX</button>
+        <button id="mirror" aria-pressed="true">Mirror</button>
           <button id="vflip" aria-pressed="false">Flip vertical</button>
           <button id="dcheck" aria-pressed="false" title="Lowers confidence when the depth disagrees with the match. Runs the depth network.">Depth check</button>
           <button id="fadestale" aria-pressed="false" title="Experimental: fades the depth where the picture moved since it was computed. Can look patchy.">Hide stale depth</button>
@@ -188,6 +189,7 @@ $('m-follow').onclick = () => api.post('/mode?name=follow');
 $('flip-pan').onclick = () => api.post('/flip?axis=pan');
 $('flip-tilt').onclick = () => api.post('/flip?axis=tilt');
 $('center').onclick = () => api.post('/center');
+$('qnxon').onclick = () => setView('qnx', !(S && S.view && S.view.qnx));
 $('mirror').onclick = () => setView('mirror', !(S && S.view && S.view.mirror));
 $('dcheck').onclick = () => setView('depthcheck', !(S && S.view && S.view.depthcheck));
 $('fadestale').onclick = () => setView('fadestale', !(S && S.view && S.view.fadestale));
@@ -207,9 +209,10 @@ const sgn = x => (x > 0 ? '(+)' : '(−)');
 function render(s) {
   S = s; setStatus(s);
   if (!s) return;
-  const v = s.view || {}, e = s.engage || {};
+  const v = s.view || {}, q = s.qnx || {};
+  const e = q.used ? Object.assign({}, s.engage, { state: q.state, armed: q.armed, shots: q.shots }) : (s.engage || {});
   for (const l of LAYERS) pressed($('layer-' + l.key), v[l.key]);
-  pressed($('mirror'), v.mirror); pressed($('vflip'), v.vflip); pressed($('smooth'), v.smooth); pressed($('fadestale'), v.fadestale); pressed($('dcheck'), v.depthcheck);
+  pressed($('mirror'), v.mirror); pressed($('qnxon'), v.qnx); pressed($('vflip'), v.vflip); pressed($('smooth'), v.smooth); pressed($('fadestale'), v.fadestale); pressed($('dcheck'), v.depthcheck);
   pressed($('m-map'), s.mode === 'map'); pressed($('m-follow'), s.mode === 'follow');
   pressed($('scan'), e.auto_scan);
 
@@ -257,6 +260,7 @@ function render(s) {
 
   for (const st of STEPS) { const li = $('step-' + st); li.className = e.state === st ? 'now' + (st === 'SEARCH' ? ' search' : '') : ''; }
   arm.textContent = e.armed ? 'Armed: click to disarm' : 'Hold to arm'; arm.classList.toggle('armed', !!e.armed);
+  $('mission-src').textContent = q.used ? (q.link ? 'decided on QNX' : 'QNX: laptop link lost, disarmed') : '';
   $('shots').textContent = `Shots ${e.shots || 0} of ${e.max_shots || 30} (simulated: no emitter yet)`;
 
   $('pan').textContent = s.angles ? s.angles[0] : '–'; $('tilt').textContent = s.angles ? s.angles[1] : '–';

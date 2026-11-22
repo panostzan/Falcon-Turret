@@ -49,7 +49,7 @@ tracker = ColorTracker()
 # This turret's servo directions (+1 = angle grows as the target goes right / down in the picture). Tilt is -1: tested
 # on the real turret, the other way pointed the wrong direction. The dashboard's Flip buttons change these live.
 DEFAULT_SIGNS = {"pan": 1, "tilt": -1}
-view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False, "smooth": True, "depthcheck": False, "cutout": False, "fadestale": False}   # flip the picture so it matches the real world (set from the dashboard)
+view = {"mirror": True, "vflip": False, "mask": False, "depth": False, "box": True, "trail": False, "smooth": True, "depthcheck": False, "cutout": False, "fadestale": False, "qnx": True}   # flip the picture so it matches the real world (set from the dashboard)
 cfg = {"lead_ms": 0, "min_conf": 80, "cut": 15}                 # aim this far ahead of a moving target; 0 = off (it amplifies noise: raise only
                                      # to about the measured camera-to-servo delay, using the dashboard slider)
 predictor = LeadPredictor()
@@ -60,12 +60,33 @@ ctl = {"tracking": False, "aimer": None, "error": None, "angles": None}
 ctl_lock = threading.Lock()
 
 
+feed_ref = {"feed": None}         # the video source (set by capture_loop); the Pi's feed also carries the QNX side
+qnx_sync = {"t": 0.0, "arm_cmd": 0.0}
+
+
+def send_pi(line):
+    """One control line to turretd (the tracker + fire interlock running on QNX). Does nothing without the Pi."""
+    f = feed_ref["feed"]
+    return f.send(line) if f else False
+
+
+def qnx_status():
+    """turretd's newest answer if the QNX tracker should be used right now, else None. It is used when the layer is on, a
+    color preset is the target (the C tracker has presets, not click-to-pick) and the answer is recent."""
+    f = feed_ref["feed"]
+    if not (view["qnx"] and f and tracker.preset in ("teal", "blue")):
+        return None
+    return f.qnx_fresh()
+
+
 def set_tracking(on):
     """Switch tracking on/off; opens the gimbal on first use. Returns an error string or None."""
     with ctl_lock:
         if not on:
             ctl["tracking"] = False
             engage.arm(False, time.time())     # switching tracking off always disarms
+            send_pi("arm 0")
+            send_pi("track 0")
             return None
         try:
             if ctl["aimer"] is None:
@@ -73,6 +94,7 @@ def set_tracking(on):
                 ctl["aimer"].sign.update(DEFAULT_SIGNS)
             ctl["angles"] = ctl["aimer"].gimbal.status()
             ctl["tracking"], ctl["error"] = True, None
+            send_pi("track 1")
         except Exception as e:          # port busy / ESP unplugged / bad reply
             ctl["tracking"], ctl["error"] = False, f"gimbal: {e}"
         return ctl["error"]
@@ -109,6 +131,19 @@ def depth_map(frame):
     sm.update(full[0], full[1], full[2], now)
     depth_state["stale"] = sm.stale_mask(thumb) if view["fadestale"] else None    # experimental, off by default
     return sm.current(now, thumb)
+
+
+def qnx_summary():
+    """What the dashboard shows about the QNX side: is it answering, and what does it decide."""
+    f = feed_ref["feed"]
+    m = f.qnx_fresh() if f else None
+    out = {"present": m is not None, "used": qnx_status() is not None, "on": view["qnx"], "events": []}
+    if m:
+        out.update(state=m["state"], armed=m["armed"], shots=m["shots"], link=m["link"], proc_ms=round(m["proc_us"] / 1000, 1),
+                   age_ms=round((time.time() - f.meta_at) * 1000))
+        age_s = time.time() - f.meta_at                   # both clocks below are the Pi's, so the difference is exact
+        out["events"] = [[round(max(0.0, (m["t_ms"] - t) / 1000.0) + age_s, 1), text] for t, text in f.events[-8:]]
+    return out
 
 
 def cutout_active():
@@ -198,7 +233,25 @@ def process(jpg, ts=None):
     if view["mirror"] or view["vflip"]:
         frame = cv2.flip(frame, -1 if view["mirror"] and view["vflip"] else 1 if view["mirror"] else 0)
     found = False
-    face = tracker.find(frame) if tracker.armed else None     # find the target on the CLEAN picture, before any overlay
+    qs = qnx_status() if tracker.armed else None
+    if qs is not None:                                        # the answer came from the tracker running on QNX
+        fh, fw = frame.shape[:2]
+        face = None
+        if qs["found"]:
+            cx = fw - qs["cx"] if view["mirror"] else qs["cx"]
+            cy = fh - qs["cy"] if view["vflip"] else qs["cy"]
+            face = (cx, cy, qs["w"], qs["h"])
+        tracker.confidence, tracker.conf_parts, tracker.blob = (qs["confidence"] if face else 0.0), {}, None
+        if engage.armed and not qs["armed"] and time.time() - qnx_sync["arm_cmd"] > 1.5:
+            engage.arm(False, now)                            # QNX disarmed (watchdog or its own rules): follow it
+    else:
+        face = tracker.find(frame) if tracker.armed else None  # find the target on the CLEAN picture, before any overlay
+    if time.time() - qnx_sync["t"] > 1.0:                     # keep the Pi's idea of the target and tracking in step
+        qnx_sync["t"] = time.time()
+        send_pi(f"preset {tracker.preset}" if tracker.preset in ("teal", "blue") else "clear")
+        send_pi(f"track {1 if ctl['tracking'] else 0}")
+        send_pi(f"min_conf {int(engage.min_confidence * 100)}")
+        send_pi(f"auto_scan {1 if engage.auto_scan else 0}")
     dmap = depth_map(frame)                          # also None when neither the Depth layer nor the depth check is on
     if face and dmap is not None:
         tracker.check_depth(dmap)
@@ -252,6 +305,7 @@ def process(jpg, ts=None):
         info.update(speed=0.0, settled=False)
         if ctl["aimer"]:
             ctl["aimer"].reset()
+    send_pi(f"aim {1 if info['settled'] else 0} {info['speed']:.1f}")
     tracking = ctl["tracking"] and tracker.armed
     _, scan_goal = engage.update(now, tracking, found, info["settled"], info["speed"],
                                  tracker.confidence if found else 0.0)
@@ -263,6 +317,7 @@ def process(jpg, ts=None):
 
 def capture_loop():
     feed = CameraFeed(CAMERA) if CAMERA is not None else FrameFeed()    # a laptop webcam, or the Pi's stream
+    feed_ref["feed"] = feed
     arrivals, count, seq, last_frame = [], 0, -1, time.time()
     while True:
         item = feed.get(seq)
@@ -294,7 +349,8 @@ def capture_loop():
                  "depth": depth_state["net"].stats() if depth_state["net"] else None, "depth_error": depth_state["error"],
                  "dropped": feed.dropped, "age_ms": round(age_ms), "cfg": dict(cfg),
                  "engage": {"state": engage.state, "armed": engage.armed, "auto_scan": engage.auto_scan,
-                            "shots": engage.shots, "max_shots": engage.max_shots}}
+                            "shots": engage.shots, "max_shots": engage.max_shots},
+                 "qnx": qnx_summary()}
         with new_frame:
             latest.update(jpg=jpg, seq=count, state=state)
             new_frame.notify_all()
@@ -417,10 +473,12 @@ class Handler(BaseHTTPRequestHandler):
             frame = cv2.imdecode(np.frombuffer(latest["jpg"], np.uint8), cv2.IMREAD_COLOR)
             ok = tracker.select(frame, float(q["x"][0]), float(q["y"][0]))
             last_seen.reset()
+            send_pi("clear")                                  # a clicked target is tracked on the laptop, not by the C presets
             return self._send(json.dumps({"ok": ok}).encode())
         if url.path == "/preset" and q.get("name", [""])[0] in PRESETS:
             tracker.use_preset(q["name"][0])
             last_seen.reset()
+            send_pi(f"preset {q['name'][0]}")
             return self._send(b"{}")
         if url.path == "/view" and q.get("key", [""])[0] in view:
             view[q["key"][0]] = q.get("on", ["0"])[0] == "1"
@@ -432,10 +490,14 @@ class Handler(BaseHTTPRequestHandler):
                 depth_state["smoother"].reset()
             return self._send(b"{}")
         if url.path == "/arm":
-            engage.arm(q.get("on", ["0"])[0] == "1", time.time())
+            on = q.get("on", ["0"])[0] == "1"
+            engage.arm(on, time.time())
+            qnx_sync["arm_cmd"] = time.time()
+            send_pi(f"arm {1 if on else 0}")
             return self._send(b"{}")
         if url.path == "/autoscan":
             engage.auto_scan = q.get("on", ["0"])[0] == "1"
+            send_pi(f"auto_scan {1 if engage.auto_scan else 0}")
             return self._send(b"{}")
         if url.path == "/cfg" and "cut" in q:
             cfg["cut"] = max(0, min(60, int(float(q["cut"][0]))))
@@ -443,6 +505,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/cfg" and "min_conf" in q:
             cfg["min_conf"] = max(30, min(100, int(float(q["min_conf"][0]))))
             engage.min_confidence = cfg["min_conf"] / 100
+            send_pi(f"min_conf {cfg['min_conf']}")
             return self._send(b"{}")
         if url.path == "/cfg" and "lead_ms" in q:
             cfg["lead_ms"] = max(0, min(800, int(float(q["lead_ms"][0]))))
@@ -450,6 +513,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/clear":
             tracker.clear()
             last_seen.reset()
+            send_pi("clear")
             return self._send(b"{}")
         if url.path == "/mode" and ctl["aimer"] and q.get("name", [""])[0] in ("map", "follow"):
             ctl["aimer"].set_mode(q["name"][0])

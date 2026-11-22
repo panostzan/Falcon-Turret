@@ -5,15 +5,22 @@ recording, JPEG-encodes (libturbojpeg, full resolution, 4:2:2) only the NEWEST f
 stdout as [4-byte little-endian length][JPEG], so latency stays low even if the consumer is slow. Recordings rotate seamlessly: the next recorder starts and is
 confirmed producing frames before the old one is stopped and deleted.
 
+If ~/turret_c/turretd exists, every picture is also handed to it (the C tracker + fire interlock + watchdog that run on QNX),
+its answers are sent to the laptop as "meta" packets (length with the top bit set, then text lines), and control lines
+arriving on this program's stdin (including the laptop's heartbeat) are forwarded to it. Without turretd the stream
+works exactly as before.
+
 File format (reverse-engineered): 96-byte header, then frames of 640*480*2 bytes each followed by
 8 extra bytes. The true frame stride is therefore 614408, not 614400.
 """
 import ctypes
 import glob
 import os
+import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
 
 UNIT = "5"
@@ -26,6 +33,9 @@ SRC_W, SRC_H = 640, 480
 FRAME = SRC_W * SRC_H * 2           # bytes of pixel data per frame (YUY2)
 STRIDE = FRAME + 8                  # bytes between frame starts in the file
 HEADER = 96
+TURRETD = os.path.expanduser("~/turret_c/turretd")
+CONTROL = ("127.0.0.1", 5005)       # turretd's control port (localhost only)
+META_FLAG = 0x80000000              # set in the length field of a packet that carries text, not a JPEG
 RECORDER = ["camera_example4_record", "-u", UNIT, "-c", "none", "-f", "ucv", "-r", FPS]
 
 
@@ -46,6 +56,75 @@ def encode(raw):
     jpg = ctypes.string_at(buf, size.value)
     _tj.tjFree(buf)
     return jpg
+
+
+class Brain:
+    """turretd, running next to this program. Optional: self.ok is False when it is not installed or will not start."""
+
+    def __init__(self):
+        self.ok = False
+        self._cv = threading.Condition()
+        self._frame = None
+        self._out = []
+        if not os.path.exists(TURRETD):
+            return
+        subprocess.call(["slay", "-f", "turretd"], stderr=subprocess.DEVNULL)
+        try:
+            self.proc = subprocess.Popen([TURRETD, str(SRC_W), str(SRC_H), str(CONTROL[1])], stdin=subprocess.PIPE,
+                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+        except OSError:
+            return
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.ok = True
+        for target in (self._write_frames, self._read_lines, self._forward_control):
+            threading.Thread(target=target, daemon=True).start()
+
+    def submit(self, raw):
+        """Hand over the newest picture; never waits (an older picture that was not taken yet is replaced)."""
+        if self.ok:
+            with self._cv:
+                self._frame = raw
+                self._cv.notify()
+
+    def _write_frames(self):
+        while True:
+            with self._cv:
+                self._cv.wait_for(lambda: self._frame is not None)
+                raw, self._frame = self._frame, None
+            try:
+                self.proc.stdin.write(raw)
+            except (BrokenPipeError, OSError):
+                self.ok = False
+                return
+
+    def _read_lines(self):
+        for line in iter(self.proc.stdout.readline, b""):
+            with self._cv:
+                self._out.append(line.decode(errors="replace").rstrip())
+                del self._out[:-300]
+
+    def _forward_control(self):
+        """Lines from the laptop (over SSH) go to turretd. When the laptop goes away they stop, and turretd's own
+        watchdog disarms the turret."""
+        for line in iter(sys.stdin.buffer.readline, b""):
+            try:
+                self.sock.sendto(line, CONTROL)
+            except OSError:
+                pass
+
+    def take(self):
+        """Everything turretd said since the last call, reduced to its newest status line and all its events."""
+        with self._cv:
+            lines, self._out = self._out, []
+        status = [l for l in lines if l.startswith("T ")][-1:]
+        return [l for l in lines if l.startswith("E ")] + status
+
+    def close(self):
+        if self.ok or getattr(self, "proc", None):
+            try:
+                self.proc.kill()
+            except OSError:
+                pass
 
 
 class Recording:
@@ -102,6 +181,7 @@ def main():
     for stale in glob.glob(DIR + "/VID_*.ucv"):
         os.remove(stale)
     out = sys.stdout.buffer
+    brain = Brain()
     cur, nxt, last = Recording(), None, -1
     try:
         while True:
@@ -115,7 +195,12 @@ def main():
             if n > last:
                 raw = cur.read(n)
                 if len(raw) == FRAME:
+                    brain.submit(raw)
                     jpg = encode(raw)
+                    said = brain.take() if brain.ok else []
+                    if said:
+                        text = "\n".join(said).encode()
+                        out.write(struct.pack("<I", META_FLAG | len(text)) + text)
                     out.write(struct.pack("<I", len(jpg)) + jpg)
                     out.flush()
                     last = n
@@ -124,6 +209,7 @@ def main():
     except (BrokenPipeError, KeyboardInterrupt):
         pass
     finally:
+        brain.close()
         for r in (cur, nxt):
             if r:
                 r.close()

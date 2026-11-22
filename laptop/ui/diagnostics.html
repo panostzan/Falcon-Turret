@@ -8,7 +8,7 @@
 <header class="top">
   <div class="brand">Turret</div>
   <nav class="tabs"><a href="/">Live</a><a href="/diagnostics" aria-current="page">Diagnostics</a></nav>
-  <div class="status"><span id="st-video">Connecting…</span><span id="st-gimbal"></span><span id="st-depth"></span></div>
+  <div class="status"><span id="st-video">Connecting…</span><span id="st-gimbal"></span><span id="st-depth"></span><span id="st-qnx"></span></div>
 </header>
 
 <main class="stack" style="flex:1;min-height:0;overflow:auto;align-content:start">
@@ -65,6 +65,9 @@ function renderState(s) {
     ['Depth layer', !s.view.depth ? 'Off' : d ? `${d.fps} fps, ${d.ms} ms per picture` : (s.depth_error || 'Loading'), s.view.depth ? (d ? 'ok' : 'warn') : 'na'],
     ['Depth error', s.depth_error || 'None', s.depth_error ? 'bad' : 'na'],
     ['Target color', s.armed ? 'Set' : 'Not set', s.armed ? 'ok' : 'na'],
+    ['QNX tracker + interlock', (s.qnx && s.qnx.present) ? `answering, ${s.qnx.proc_ms} ms per picture, ${s.qnx.used ? 'in use' : 'not in use'}` : 'not answering',
+      (s.qnx && s.qnx.used) ? 'ok' : (s.qnx && s.qnx.present) ? 'warn' : 'na'],
+    ['QNX link watchdog', (s.qnx && s.qnx.present) ? (s.qnx.link ? 'heartbeat ok' : 'LINK LOST: QNX disarmed the turret') : '-', (s.qnx && s.qnx.present) ? (s.qnx.link ? 'ok' : 'bad') : 'na'],
     ['Distance sensor', 'Not connected', 'na'],
     ['IR emitter / receiver', 'Not connected', 'na'],
   ]);
@@ -91,8 +94,10 @@ function renderTelemetry(t) {
   drawChart($('c-speed'), [{ v: s.speed, color: '#2fb8a8' }]);
   $('v-interval').textContent = fixed(last(s.interval_ms), 0); $('v-interval95').textContent = fixed(st.interval_ms.p95, 0);
   $('v-proc').textContent = fixed(last(s.proc_ms), 1); $('v-proc95').textContent = fixed(st.proc_ms.p95, 1);
-  $('log').innerHTML = t.events.length
-    ? t.events.slice().reverse().map(([ago, text]) => `<div><span>${ago}s ago</span>${text}</div>`).join('')
+  const qe = (S && S.qnx && S.qnx.events || []).map(([ago, text]) => [ago, 'QNX: ' + text]);
+  const all = t.events.concat(qe).sort((a, b) => a[0] - b[0]);
+  $('log').innerHTML = all.length
+    ? all.map(([ago, text]) => `<div><span>${ago}s ago</span>${text}</div>`).join('')
     : '<small>No events yet.</small>';
 }
 

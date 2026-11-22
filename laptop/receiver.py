@@ -60,7 +60,7 @@ def _spawn(quality):
          "-o", "ServerAliveInterval=5",
          # the Pi's IP changes, but its identity does not: trust its saved key under a fixed name, refuse any other host
          "-o", "HostKeyAlias=qnxpi", "-o", "StrictHostKeyChecking=yes", f"{USER}@{find_pi_ip()}", f"python3 ~/bin/pi_stream.py {FPS} {quality}"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
 
 
 def _read_exact(stream, n):
@@ -75,18 +75,59 @@ def _read_exact(stream, n):
     return buf
 
 
-def jpeg_frames(quality=QUALITY):
-    """Yield (timestamp, JPEG bytes) forever; reconnects if the link drops."""
+META_FLAG = 0x80000000   # set in a packet's length when it carries text from turretd (on QNX) instead of a JPEG
+MAX_PACKET = 8 * 1024 * 1024
+
+
+def parse_meta(text):
+    """turretd's lines -> (status, events). status is a dict from the newest 'T' line (or None); events are (t_ms, text).
+    T line: T seq t_ms found cx cy w h confidence state armed shots link proc_us scan_pan"""
+    status, events = None, []
+    for line in text.splitlines():
+        parts = line.split()
+        try:
+            if parts[0] == "T" and len(parts) == 15:
+                status = {"seq": int(parts[1]), "t_ms": float(parts[2]), "found": parts[3] == "1",
+                          "cx": float(parts[4]), "cy": float(parts[5]), "w": float(parts[6]), "h": float(parts[7]),
+                          "confidence": float(parts[8]), "state": parts[9], "armed": parts[10] == "1",
+                          "shots": int(parts[11]), "link": parts[12] == "1", "proc_us": float(parts[13]),
+                          "scan_pan": float(parts[14])}
+            elif parts[0] == "E" and len(parts) >= 3:
+                events.append((float(parts[1]), " ".join(parts[2:])))
+        except (ValueError, IndexError):
+            continue          # a garbled line is skipped, never fatal
+    return status, events
+
+
+def jpeg_frames(quality=QUALITY, on_meta=None, on_proc=None):
+    """Yield (timestamp, JPEG bytes) forever; reconnects if the link drops.
+    Text packets from turretd are passed to on_meta(text); on_proc(process or None) is told about each ssh process, so the
+    caller can send control lines to the Pi through its stdin."""
     while True:
         proc = _spawn(quality)
+        if on_proc:
+            on_proc(proc)
         try:
             while True:
                 head = _read_exact(proc.stdout, 4)
-                body = head and _read_exact(proc.stdout, struct.unpack("<I", head)[0])
+                if head is None:
+                    break
+                length = struct.unpack("<I", head)[0]
+                is_meta = bool(length & META_FLAG)
+                length &= ~META_FLAG
+                if length > MAX_PACKET:
+                    break                                    # garbage on the line: reconnect
+                body = _read_exact(proc.stdout, length)
                 if body is None:
                     break
+                if is_meta:
+                    if on_meta:
+                        on_meta(bytes(body).decode(errors="replace"))
+                    continue
                 yield time.time(), bytes(body)
         finally:
+            if on_proc:
+                on_proc(None)
             proc.kill()
             proc.wait()
         time.sleep(1)   # brief backoff before reconnecting
@@ -103,10 +144,48 @@ class FrameFeed:
         self._cv = threading.Condition()
         self._latest, self._seq, self._consumed = None, 0, 0
         self.dropped = 0
+        self.meta, self.meta_at = None, 0.0          # newest status line from turretd (QNX) and when it arrived
+        self.events = []                             # (t_ms, text) from turretd, newest last
+        self._proc = None
         threading.Thread(target=self._run, args=(quality,), daemon=True).start()
+        threading.Thread(target=self._heartbeat, daemon=True).start()
+
+    def _on_meta(self, text):
+        status, events = parse_meta(text)
+        if status:
+            self.meta, self.meta_at = status, time.time()
+        if events:
+            self.events = (self.events + events)[-40:]
+
+    def _on_proc(self, proc):
+        self._proc = proc
+        if proc is None:
+            self.meta = None                          # the Pi side is gone: do not trust the last answer
+
+    def send(self, line):
+        """Send one control line to turretd on the Pi. Returns False if there is no connection."""
+        proc = self._proc
+        if proc is None:
+            return False
+        try:
+            proc.stdin.write(line.encode() + b"\n")
+            proc.stdin.flush()
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def _heartbeat(self):
+        """turretd disarms the turret by itself if these stop (the laptop or the link died)."""
+        while True:
+            self.send("hb")
+            time.sleep(0.2)
+
+    def qnx_fresh(self, max_age=0.6):
+        """The newest turretd status if it is recent, else None."""
+        return self.meta if (self.meta and time.time() - self.meta_at < max_age) else None
 
     def _run(self, quality):
-        for ts, jpg in jpeg_frames(quality):
+        for ts, jpg in jpeg_frames(quality, self._on_meta, self._on_proc):
             with self._cv:
                 if self._seq != self._consumed:     # the previous frame was never picked up
                     self.dropped += 1
@@ -130,6 +209,7 @@ class CameraFeed:
 
     def __init__(self, index, quality=90):
         self.index, self.quality, self.error, self.dropped = index, quality, None, 0
+        self.meta, self.events = None, []             # no QNX behind a laptop webcam
         self._cv = threading.Condition()
         self._latest, self._seq, self._consumed = None, 0, 0
         threading.Thread(target=self._run, daemon=True).start()
@@ -167,6 +247,12 @@ class CameraFeed:
                 return None
             self._consumed = self._seq
             return (self._seq, *self._latest)
+
+    def send(self, line):
+        return False
+
+    def qnx_fresh(self, max_age=0.6):
+        return None
 
 
 if __name__ == "__main__":

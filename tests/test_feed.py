@@ -9,7 +9,7 @@ import receiver   # noqa: E402
 
 def test_slow_start():
     """Asking for a frame before the first one has arrived must wait for it, not return garbage or crash."""
-    def slow_stream(quality):
+    def slow_stream(quality, *args):
         time.sleep(0.4)                       # the Pi takes a while to start streaming
         yield time.time(), b"first"
         time.sleep(10)
@@ -26,7 +26,7 @@ def test_slow_start():
 
 def test():
     test_slow_start()
-    def fake_stream(quality):                 # 100 frames at ~100 fps, numbered 0..99
+    def fake_stream(quality, *args):               # 100 frames at ~100 fps, numbered 0..99
         for i in range(100):
             yield time.time(), str(i).encode()
             time.sleep(0.01)

@@ -22,7 +22,9 @@ function setStatus(s) {
   put('st-gimbal', s.angles ? 'on' : s.error ? 'bad' : '', s.angles ? 'Gimbal connected' : s.error ? 'Gimbal error' : 'Gimbal idle');
   const d = s.depth;
   put('st-depth', s.view && s.view.depth ? (d && d.available ? 'on' : 'warn') : '', s.view && s.view.depth ? `Depth ${d ? d.fps : '–'} fps` : 'Depth off');
-  document.body.classList.toggle('armed', !!(s.engage && s.engage.armed));
+  const q = s.qnx || {};
+  put('st-qnx', q.used ? 'on' : q.present ? 'warn' : '', q.used ? `QNX tracker ${q.proc_ms} ms` : q.present ? 'QNX connected (laptop tracker)' : 'QNX not answering');
+  document.body.classList.toggle('armed', !!((s.qnx && s.qnx.used) ? s.qnx.armed : (s.engage && s.engage.armed)));
 }
 
 /* Line chart. sets: [{v:[numbers|null], color}], range: [min, max] or null for 0..max. */
