@@ -40,6 +40,87 @@ class FakeESP:
         pass
 
 
+class FakeFeather:
+    """Mirrors firmware/feather_m0/gimbal_pca9685: three servos (P, T, L), limp until the first command to each, O releases,
+    F trims the oscillator, replies carry all three angles. No angle limits in the firmware itself."""
+
+    def __init__(self):
+        self.angle, self.energised, self.osc, self.out, self.log = [90, 22, 90], [False] * 3, 25000, b"", []
+
+    def write(self, data):
+        cmd = data.decode().strip()
+        self.log.append(cmd)
+        if cmd == "C":
+            self.angle = [90, 22, 90]
+            self.energised = [True] * 3
+        elif cmd == "S":
+            pass
+        elif cmd == "O":
+            self.energised = [False] * 3
+        elif cmd == "R":
+            self.out += b"R-1\n"
+            return
+        elif cmd == "I":
+            self.out += b"I none\n"
+            return
+        elif cmd[:1] in "PTL" and len(cmd) > 1:
+            if len(cmd) > 4 or not cmd[1:].isdigit():
+                self.out += b"ERR invalid angle\n"
+                return
+            axis = "PTL".index(cmd[0])
+            self.angle[axis] = max(0, min(180, int(cmd[1:])))
+            self.energised[axis] = True
+        elif cmd[:1] == "F" and len(cmd) > 1:
+            if not cmd[1:].isdigit() or not 20000 <= int(cmd[1:]) <= 30000:
+                self.out += b"ERR frequency out of range\n"
+                return
+            self.osc = int(cmd[1:])
+        else:
+            self.out += b"ERR unknown command\n"
+            return
+        self.out += f"P{self.angle[0]} T{self.angle[1]} L{self.angle[2]}\n".encode()
+
+    def readline(self):
+        line, _, self.out = self.out.partition(b"\n")
+        return line + b"\n"
+
+    def close(self):
+        pass
+
+
+def test_feather():
+    """The laptop side against the Feather firmware's rules: limp start, first command always sent, lift servo, release."""
+    f = FakeFeather()
+    g = Gimbal(link=f, tilt_limits=(0, 180))
+    assert g.status() == (90, 22) and g.lift == 90 and f.energised == [False] * 3, "starts limp"
+    g.move_to(pan=90)                                      # the same as the assumed start angle, but it must still be sent
+    assert f.energised == [True, False, False] and f.log[-1] == "P90", f.log
+    g.move_to(pan=90)
+    assert f.log.count("P90") == 1, "after that, an unchanged angle is not sent again"
+    g.move_to(tilt=22, lift=90)                            # first commands to tilt and lift: sent even though they equal the start values
+    assert f.energised == [True, True, True] and g.lift == 90
+    g.move_to(lift=140)
+    assert g.lift == 140 and f.angle[2] == 140 and f.log[-1] == "L140"
+    g.move_to(lift=999)
+    assert f.angle[2] == 180, "the lift goes up to 180 and no further"
+    g.release()
+    assert f.energised == [False] * 3 and f.log[-1] == "O"
+    g.move_to(pan=90)
+    assert f.energised[0] and f.log[-1] == "P90", "after a release the next command energises again"
+    g.set_oscillator(26500)
+    assert f.osc == 26500
+    assert g.center() == (90, 22) and f.energised == [True] * 3
+    g.move_to(pan=120, lift=30)
+    assert (f.angle[0], f.angle[2]) == (120, 30) and g.pan == 120 and g.lift == 30
+    for bad in ("L9999", "Lx", "F5", "Z"):                 # errors come back as ERR and raise on the laptop side
+        f.write(bad.encode())
+        assert f.readline().startswith(b"ERR"), bad
+    old = FakeESP()                                        # the ESP32 firmware (no lift in its replies) still works
+    h = Gimbal(link=old)
+    assert h.status() == (90, 22) and h.lift == 90
+    print("feather firmware rules ok")
+
+
 def test_udp():
     """Same checks, but over a real UDP socket with a simulated ESP (as the Wi-Fi firmware behaves)."""
     import socket
@@ -138,5 +219,6 @@ def test():
 
 if __name__ == "__main__":
     test()
+    test_feather()
     test_udp()
     test_async()
