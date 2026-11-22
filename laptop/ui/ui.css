@@ -1,20 +1,22 @@
-/* Turret dashboard: tactical console. Olive-black matte panels, one phosphor-lime signal colour for "good / selected",
-   amber for "searching", red for "armed". Bahnschrift (DIN-style) for labels, Consolas for readouts. */
+/* Turret dashboard. Near-black graphite, hairline borders, one orange accent for what is active or being measured; green, yellow and
+   red appear only as health or alarm. Bahnschrift for text and big numerals (light weight), Consolas for small readouts.
+   Labels are small, dim and capitalised; numbers are large and thin. Type scale: 12 / 13 / 14 / 16 / 20 / 24 / 30 px. */
 :root {
-  --bg: #0f120c;
-  --panel: #171b12;
-  --raise: #1f2418;
-  --line: #333b27;
-  --text: #dfe6cf;
-  --dim: #8b9777;
-  --teal: #b6e23a;            /* the signal colour (name kept so old rules still work) */
-  --teal-ink: #11160a;
-  --ok: #b6e23a;
-  --warn: #ffb000;
-  --alarm: #ff4b2b;
-  --font: "Bahnschrift SemiCondensed", "Bahnschrift", "Segoe UI", system-ui, sans-serif;
+  --bg: #050505;
+  --panel: #0d0d0e;
+  --raise: #161617;
+  --line: #262628;
+  --text: #e8e8e6;
+  --dim: #8a8a8a;
+  --teal: #e8793a;            /* the signal colour (name kept so old rules still work) */
+  --teal-ink: #0a0a0a;
+  --ok: #6fbf7a;
+  --warn: #e3b341;
+  --alarm: #e5484d;
+  --label: #b4b4b4;
+  --font: "Bahnschrift", "Segoe UI", system-ui, sans-serif;
   --mono: "Consolas", "Cascadia Mono", monospace;
-  --r: 2px;
+  --r: 4px;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -23,33 +25,29 @@ body {
   margin: 0; background: var(--bg); color: var(--text); height: 100%;
   font: 14px/1.35 var(--font); font-variant-numeric: tabular-nums;
   padding: 0 clamp(12px, 2vw, 24px) 14px; display: flex; flex-direction: column;
-  background-image: linear-gradient(rgba(182,226,58,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(182,226,58,.025) 1px, transparent 1px);
-  background-size: 32px 32px;
 }
 body.armed::before {
-  content: "ARMED  //  A LOCK WILL FIRE"; flex: none; text-align: center; letter-spacing: .25em; font-weight: 700;
-  background: repeating-linear-gradient(135deg, var(--alarm) 0 14px, #b5301a 14px 28px); color: #fff; padding: 3px 0;
-  margin: 0 calc(-1 * clamp(12px, 2vw, 24px));
+  content: "ARMED: A LOCK WILL FIRE"; flex: none; text-align: center; letter-spacing: .1em; font-weight: 600; font-size: 13px;
+  background: var(--alarm); color: #fff; padding: 4px 0; margin: 0 calc(-1 * clamp(12px, 2vw, 24px));
 }
 a { color: inherit; }
 :focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 h2 {
-  margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; color: var(--teal);
-  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 12px; font-size: 12px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--label);
+  display: flex; align-items: baseline; gap: 10px;
 }
-h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 small, .dim { color: var(--dim); }
 
 /* top bar */
 .top { flex: none; display: flex; align-items: center; gap: 22px; flex-wrap: wrap; padding: 9px 0; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
-.brand { font-size: 18px; font-weight: 700; letter-spacing: .3em; text-transform: uppercase; }
-.brand::before { content: "\25B6"; color: var(--teal); margin-right: 10px; font-size: 12px; }
+.brand { font-size: 16px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; }
 .tabs { display: flex; gap: 2px; }
-.tabs a { text-decoration: none; padding: 4px 16px; color: var(--dim); letter-spacing: .12em; text-transform: uppercase; font-size: 12px; border: 1px solid transparent; }
-.tabs a[aria-current="page"] { color: var(--teal); border-color: var(--line); background: var(--panel); }
-.status { margin-left: auto; display: flex; gap: 20px; flex-wrap: wrap; color: var(--dim); font: 12px var(--mono); text-transform: uppercase; }
-.status span::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; background: var(--line); }
-.status .on::before { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.tabs a { text-decoration: none; padding: 6px 14px; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; font-size: 12px; border-bottom: 2px solid transparent; }
+.tabs a:hover { color: var(--text); }
+.tabs a[aria-current="page"] { color: var(--text); border-bottom-color: var(--teal); }
+.status { margin-left: auto; display: flex; gap: 20px; flex-wrap: wrap; color: var(--dim); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+.status span::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; background: var(--line); border-radius: 50%; }
+.status .on::before { background: var(--ok); }
 .status .warn::before { background: var(--warn); }
 .status .bad::before { background: var(--alarm); }
 
@@ -59,37 +57,32 @@ small, .dim { color: var(--dim); }
 .side { min-height: 0; overflow: auto; display: grid; gap: 10px; align-content: start; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 @media (max-width: 900px) { html, body { height: auto; } .layout { grid-template-columns: 1fr; } .stage { height: 60vw; } }
 .stack { display: grid; gap: 14px; }
-.panel { background: var(--panel); padding: 12px 14px; border: 1px solid var(--line); border-left: 3px solid var(--line); }
+.panel { background: var(--panel); padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--r); }
 .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
-/* video with corner brackets and a HUD readout */
-.stage { position: relative; flex: 1; min-height: 0; background: #070906; border: 1px solid var(--line); }
+/* the video, with a status badge */
+.stage { position: relative; flex: 1; min-height: 0; background: #000; border: 1px solid var(--line); border-radius: var(--r); }
 .stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
-.stage::before, .stage::after {
-  content: ""; position: absolute; width: 22px; height: 22px; z-index: 2; pointer-events: none; border: 2px solid var(--teal);
-}
-.stage::before { left: 6px; top: 6px; border-right: 0; border-bottom: 0; }
-.stage::after { right: 6px; bottom: 6px; border-left: 0; border-top: 0; }
 .badge {
-  position: absolute; left: 14px; top: 14px; z-index: 3; padding: 3px 12px; background: rgba(10, 12, 7, .85);
-  border: 1px solid var(--line); font-weight: 700; letter-spacing: .18em; text-transform: uppercase; font-size: 12px;
+  position: absolute; left: 14px; top: 14px; z-index: 3; padding: 3px 12px; background: rgba(5, 5, 5, .85);
+  border: 1px solid var(--line); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: 12px; border-radius: var(--r);
 }
 .badge.good { background: var(--teal); color: var(--teal-ink); border-color: var(--teal); }
-.badge.warn { background: var(--warn); color: #2a1c00; border-color: var(--warn); }
+.badge.warn { background: var(--warn); color: #1a1400; border-color: var(--warn); }
 .badge.bad { background: var(--alarm); color: #fff; border-color: var(--alarm); }
 #lostbox[data-p="LOST"] h2 { color: var(--alarm); }
 #lostbox[data-p="OCCLUDED"] h2, #lostbox[data-p="REACQUIRING"] h2 { color: var(--warn); }
 .hint { color: var(--dim); margin: 0; font-size: 12px; }
 
 .nosignal { position: absolute; inset: 0; z-index: 4; display: grid; place-content: center; gap: 10px; text-align: center; padding: 20px;
-  background: rgba(10, 12, 7, .82); }
+  background: rgba(5, 5, 5, .82); }
 .nosignal[hidden] { display: none; }          /* the display above would otherwise win over the hidden attribute */
-.nosignal b { font-size: 26px; letter-spacing: .25em; color: var(--alarm); }
+.nosignal b { font-size: 24px; font-weight: 500; letter-spacing: .12em; color: var(--alarm); }
 .nosignal span { color: var(--text); max-width: 460px; }
 
 /* controls */
 button, .btn {
-  font: inherit; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--text); background: var(--raise);
+  font: inherit; font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text); background: var(--raise);
   border: 1px solid var(--line); border-radius: var(--r); padding: 6px 12px; cursor: pointer;
 }
 button:hover { border-color: var(--teal); }
@@ -100,40 +93,40 @@ button:disabled { opacity: .5; cursor: default; }
 
 /* layer toggles sit directly under the picture */
 .layers { flex: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
-.layer { display: grid; gap: 1px; text-align: left; padding: 7px 12px; text-transform: none; letter-spacing: .02em; font-size: 14px; background: var(--panel); border-left: 3px solid var(--line); }
-.layer b { font-weight: 600; }
-.layer span { font: 11px var(--mono); color: var(--dim); text-transform: uppercase; }
-.layer[aria-pressed="true"] { background: var(--raise); color: var(--teal); border-color: var(--teal); box-shadow: inset 0 0 0 1px var(--teal); }
+.layer { display: grid; gap: 1px; text-align: left; padding: 8px 12px; text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 400; background: var(--panel); }
+.layer b { font-weight: 500; }
+.layer span { font-size: 12px; color: var(--dim); }
+.layer[aria-pressed="true"] { background: var(--raise); color: var(--text); border-color: var(--teal); }
 .layer[aria-pressed="true"] span { color: var(--teal); }
-.presets { flex: none; display: flex; gap: 6px; align-items: center; color: var(--dim); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+.presets { flex: none; display: flex; gap: 6px; align-items: center; color: var(--dim); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
 .presets button { padding: 3px 10px; }
 .presets .hint { margin-left: auto; text-transform: none; letter-spacing: 0; }
 
 /* mission stepper */
 .stepper { display: flex; gap: 3px; padding: 0; margin: 0 0 10px; }
-.stepper li { list-style: none; flex: 1; text-align: center; padding: 4px 0; background: var(--raise); color: var(--dim); font: 11px var(--mono); text-transform: uppercase; border-bottom: 2px solid var(--line); }
+.stepper li { list-style: none; flex: 1; text-align: center; padding: 4px 0; background: var(--raise); color: var(--dim); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; border-bottom: 2px solid var(--line); }
 .stepper li.now { background: var(--raise); color: var(--teal); border-bottom-color: var(--teal); }
 .stepper li.now.search { color: var(--warn); border-bottom-color: var(--warn); }
 .hold { position: relative; overflow: hidden; }
-.hold::after { content: ""; position: absolute; inset: 0; background: rgba(255, 75, 43, .45); transform-origin: left; transform: scaleX(var(--p, 0)); }
+.hold::after { content: ""; position: absolute; inset: 0; background: rgba(229, 72, 77, .45); transform-origin: left; transform: scaleX(var(--p, 0)); }
 .hold.armed { background: var(--alarm); color: #fff; border-color: var(--alarm); }
 
 /* confidence meter: the white tick is the level required to lock and fire */
-.meter { position: relative; height: 10px; background: #0a0d07; border: 1px solid var(--line); margin: 2px 0 8px; }
+.meter { position: relative; height: 10px; background: #060606; border: 1px solid var(--line); margin: 2px 0 8px; }
 .meter i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--dim); }
 .meter.sure i { background: var(--teal); }
 .meter.unsure i { background: var(--warn); }
 .meter u { position: absolute; top: -4px; bottom: -4px; width: 2px; background: #fff; text-decoration: none; }
-.big { font: 600 28px/1.1 var(--mono); }
+.big { font: 300 30px/1.1 var(--font); }
 label { display: grid; gap: 4px; margin-top: 8px; font-size: 12px; color: var(--dim); }
 
 /* readouts */
 .pair { display: flex; gap: 26px; }
 .pair div { display: grid; }
-.pair b { font: 600 28px/1.1 var(--mono); color: var(--teal); }
-.pair small { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+.pair b { font: 300 30px/1.1 var(--font); color: var(--text); }
+.pair small { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
 details { margin-top: 6px; }
-summary { cursor: pointer; padding: 4px 0; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+summary { cursor: pointer; padding: 4px 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
 details .row { margin: 8px 0; }
 input[type="range"] { width: 100%; accent-color: var(--teal); }
 .err { color: var(--alarm); margin-top: 6px; min-height: 1.2em; font: 12px var(--mono); }
@@ -147,7 +140,7 @@ td { font-family: var(--mono); }
 td:last-child, th:last-child { text-align: right; }
 th { color: var(--dim); }
 td.ok { color: var(--ok); } td.warn { color: var(--warn); } td.bad { color: var(--alarm); } td.na { color: var(--dim); }
-canvas { width: 100%; height: 100px; display: block; background: #0a0d07; border: 1px solid var(--line); margin: 6px 0 4px; }
+canvas { width: 100%; height: 100px; display: block; background: #060606; border: 1px solid var(--line); margin: 6px 0 4px; }
 .log { max-height: 220px; overflow: auto; font-family: var(--mono); font-size: 13px; }
 .log div { padding: 3px 0; border-bottom: 1px solid var(--line); }
 .log span { color: var(--dim); margin-right: 10px; }
