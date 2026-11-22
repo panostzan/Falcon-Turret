@@ -9,3 +9,6 @@ libturret_tracker.so: tracker.c tracker.h
 
 clean:
 	rm -f libturret_tracker.so *.o
+
+turretd: turretd.c tracker.c engage.c tracker.h engage.h
+	$(CC) -O2 -std=gnu99 -Wall -Wextra -o $@ turretd.c tracker.c engage.c -lm -lsocket
