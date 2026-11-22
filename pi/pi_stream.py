@@ -244,12 +244,39 @@ class Recording:
                 pass
 
 
+LAST_FRAME = [time.time()]          # when the newest picture was read; the status thread watches this
+
+
+def usb_has_device():
+    """True if the Pi's USB controllers list any device (a camera that fell off the bus lists nothing). Only asked when stalled."""
+    try:
+        out = subprocess.run(["usb"], capture_output=True, text=True, timeout=4).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return "Vendor" in out
+
+
+def camera_status(brain):
+    """Once a second: 'C ok <age>' while pictures flow, 'C stalled <age> usb|nousb' when none arrived for 2 s, so the dashboard can
+    say WHY there is no picture (camera not detected, or detected but silent)."""
+    while True:
+        time.sleep(1.0)
+        age = time.time() - LAST_FRAME[0]
+        if age < 2.0:
+            brain._push_udp(f"C ok {age:.1f}")
+        else:
+            present = usb_has_device()
+            brain._push_udp(f"C stalled {age:.1f} {'usb' if present else 'nousb' if present is not None else 'unknown'}")
+
+
 def main():
     subprocess.call(["slay", "-f", "camera_example4_record"], stderr=subprocess.DEVNULL)
     for stale in glob.glob(DIR + "/VID_*.ucv"):
         os.remove(stale)
     out = sys.stdout.buffer
     brain = Brain()
+    if brain.ok:
+        threading.Thread(target=camera_status, args=(brain,), daemon=True).start()
     cur, nxt, last = Recording(), None, -1
     try:
         while True:
@@ -263,6 +290,7 @@ def main():
             if n > last:
                 raw = cur.read(n)
                 if len(raw) == FRAME:
+                    LAST_FRAME[0] = time.time()
                     marker = brain.submit(raw)
                     jpg = encode(raw)                       # turretd works on the same picture while this runs
                     said = brain.take(marker, 0.02) if brain.ok else []

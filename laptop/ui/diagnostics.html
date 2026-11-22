@@ -3,7 +3,73 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Turret diagnostics</title>
 <link rel="stylesheet" href="/ui.css">
-<script>document.documentElement.style.height="auto"</script>
+<style>
+  /* One screen, three questions answered top to bottom: is it healthy (verdict + tiles), what is wrong (needs attention),
+     how fast is it (performance). Nothing scrolls except the event log inside its own panel. */
+  .diag { flex: 1; min-height: 0; display: grid; gap: 10px; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.45fr) minmax(0, 1fr);
+          grid-template-rows: auto minmax(0, 1fr); }
+  .verdict { grid-column: 1; display: flex; align-items: center; gap: 14px; padding: 12px 16px; background: var(--panel); border: 1px solid var(--line);
+             border-left: 4px solid var(--dim); }
+  .verdict .big { font: 700 22px/1.1 var(--font); letter-spacing: .16em; text-transform: uppercase; }
+  .verdict small { display: block; margin-top: 4px; font-size: 12px; line-height: 1.3; }
+  .verdict.ok { border-left-color: var(--ok); } .verdict.ok .big { color: var(--ok); }
+  .verdict.warn { border-left-color: var(--warn); } .verdict.warn .big { color: var(--warn); }
+  .verdict.bad { border-left-color: var(--alarm); } .verdict.bad .big { color: var(--alarm); }
+  .tiles { grid-column: 2 / span 2; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--line); padding: 7px 9px; min-width: 0; }
+  .tile.ok { border-top-color: var(--ok); } .tile.warn { border-top-color: var(--warn); } .tile.bad { border-top-color: var(--alarm); }
+  .tile .n { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+  .tile .v { font: 600 15px/1.25 var(--mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile.bad .v { color: var(--alarm); } .tile.warn .v { color: var(--warn); } .tile.off .v { color: var(--dim); }
+  .tile .s { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .diag .panel { min-height: 0; min-width: 0; overflow: hidden; padding: 10px 14px; display: flex; flex-direction: column; }
+  .diag h2 { margin-bottom: 8px; }
+  ol.issues { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .bottleneck { margin-top: 8px; padding: 9px 12px; background: var(--raise); border-left: 3px solid var(--teal); }
+  .bottleneck b { display: block; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); font-weight: 500; }
+  .bottleneck span { display: block; font-size: 13px; margin-top: 3px; }
+  ol.issues li { padding: 8px 0 8px 12px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--line); margin-bottom: 6px; background: var(--raise); }
+  ol.issues li.bad { border-left-color: var(--alarm); } ol.issues li.warn { border-left-color: var(--warn); }
+  ol.issues b { display: block; font-size: 14px; }
+  ol.issues li.bad b { color: var(--alarm); } ol.issues li.warn b { color: var(--warn); }
+  ol.issues .why { display: block; color: var(--text); font-size: 12.5px; margin-top: 2px; padding-right: 8px; }
+  ol.issues .fix { display: block; color: var(--teal); font-size: 12.5px; margin-top: 3px; }
+  .clear { flex: 1; display: grid; place-content: center; text-align: center; color: var(--ok); font: 600 16px var(--font); letter-spacing: .12em; text-transform: uppercase; }
+  .clear small { display: block; color: var(--dim); font-weight: 400; letter-spacing: 0; text-transform: none; margin-top: 4px; }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+  .kpi .num { font: 600 24px/1.1 var(--mono); } .kpi .lab { font-size: 11px; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; }
+  .kpi.ok .num { color: var(--ok); } .kpi.warn .num { color: var(--warn); } .kpi.bad .num { color: var(--alarm); } .kpi.off .num { color: var(--dim); }
+  .sub-h { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin: 4px 0 4px; display: flex; justify-content: space-between; gap: 8px; }
+  .sub-h b { color: var(--text); letter-spacing: 0; text-transform: none; font-weight: 500; }
+  .budget { display: flex; height: 22px; background: #0a0d07; border: 1px solid var(--line); }
+  .budget i { display: block; height: 100%; min-width: 3px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin: 5px 0 8px; color: var(--dim); }
+  .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 6px; background: var(--c); }
+  .legend b { color: var(--text); font-weight: 500; }
+  .chartbox { flex: 1; min-height: 60px; display: flex; flex-direction: column; }
+  .chartbox canvas { flex: 1; min-height: 0; height: 100%; margin: 2px 0; }
+  .cmp { display: grid; gap: 5px; margin-bottom: 8px; font-size: 12px; }
+  .cmp div { display: grid; grid-template-columns: 88px 1fr 168px; align-items: center; gap: 8px; }
+  .cmp .track { height: 10px; background: #0a0d07; border: 1px solid var(--line); } .cmp .track i { display: block; height: 100%; }
+  .cmp .val { text-align: right; color: var(--text); font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+
+  .side table { font-size: 12px; } .side td, .side th { padding: 2px 0; }
+  .side .log { flex: 1; min-height: 40px; max-height: none; font-size: 12px; }
+  .side h2 + table + h2 { margin-top: 10px; }
+  .side-col { display: flex; flex-direction: column; min-height: 0; gap: 10px; }
+  .side-col .panel { flex: 1 1 0; }
+  .side-col .panel.readings { flex: 1.3 1 0; }
+
+  @media (max-width: 1000px) {         /* a narrow window: stack everything and let the page scroll */
+    html, body { height: auto; }
+    .diag { grid-template-columns: 1fr; grid-template-rows: none; }
+    .verdict, .tiles { grid-column: auto; }
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .chartbox canvas { height: 100px; }
+  }
+</style>
 
 <header class="top">
   <div class="brand">Turret</div>
@@ -11,99 +77,189 @@
   <div class="status"><span id="st-video">Connecting…</span><span id="st-gimbal"></span><span id="st-depth"></span><span id="st-qnx"></span></div>
 </header>
 
-<main class="stack" style="flex:1;min-height:0;overflow:auto;align-content:start">
-  <div class="grid2">
-    <section class="panel">
-      <h2>Links and sensors</h2>
-      <table id="links"></table>
-    </section>
-    <section class="panel">
-      <h2>This computer</h2>
-      <table id="sys"></table>
-    </section>
-  </div>
-
-  <div class="grid2">
-    <section class="panel">
-      <h2>Picture timing</h2>
-      <canvas id="c-interval"></canvas>
-      <small>Gap between pictures, ms. Now <b id="v-interval">–</b>, 95% under <b id="v-interval95">–</b></small>
-      <canvas id="c-proc"></canvas>
-      <small>Processing per picture, ms. Now <b id="v-proc">–</b>, 95% under <b id="v-proc95">–</b></small>
-    </section>
-    <section class="panel">
-      <h2>Aim</h2>
-      <canvas id="c-aim"></canvas>
-      <small><span style="color:#2fb8a8">Pan</span> and <span style="color:#e0a030">tilt</span>, degrees</small>
-      <canvas id="c-speed"></canvas>
-      <small>Target speed, picture widths per second</small>
-    </section>
-  </div>
+<main class="diag">
+  <section class="verdict" id="verdict"><div><div class="big" id="v-title">Checking…</div><small id="v-sub" class="dim"></small></div></section>
+  <section class="tiles" id="tiles"></section>
 
   <section class="panel">
-    <h2>Event log</h2>
-    <div class="log" id="log"><small>No events yet.</small></div>
+    <h2>Needs attention</h2>
+    <ol class="issues" id="issues"></ol>
+    <div class="bottleneck" id="bottleneck"><b>Biggest bottleneck</b><span id="bottleneck-text">measuring…</span></div>
   </section>
+
+  <section class="panel">
+    <h2>Real-time performance</h2>
+    <div class="kpis" id="kpis"></div>
+    <div class="sub-h">Control loop, where the time goes <b id="budget-total">–</b></div>
+    <div class="budget" id="budget"></div>
+    <div class="legend" id="budget-legend"></div>
+    <div class="sub-h">Control message round trip <b>shorter is better</b></div>
+    <div class="cmp" id="cmp"></div>
+    <div class="sub-h">Gap between video pictures <b id="gap-now">–</b></div>
+    <div class="chartbox"><canvas id="c-gap"></canvas></div>
+  </section>
+
+  <div class="side-col side">
+    <section class="panel readings"><h2>All readings</h2><table id="readings"></table></section>
+    <section class="panel"><h2>Event log</h2><div class="log" id="log"><small>No events yet.</small></div></section>
+  </div>
 </main>
 
 <script src="/ui.js"></script>
 <script>
-let S = null;
-const rows = (id, list) => {
-  $(id).innerHTML = list.map(([k, v, cls]) => `<tr><th>${k}</th><td class="${cls || ''}">${v}</td></tr>`).join('');
-};
+let S = null, SYS = null, TEL = null;
+const ms = v => (v == null ? '–' : (v >= 100 ? Math.round(v) : Number(v).toFixed(v < 10 ? 1 : 0)) + ' ms');
 
-function renderState(s) {
-  S = s; setStatus(s);
-  if (!s) { rows('links', [['Server', 'Not reachable', 'bad']]); return; }
-  const d = s.depth;
-  rows('links', [
-    ['Video source', s.source || 'Pi', ''],
-    ['Video', s.connected ? `${s.fps} fps, ${s.kb} KB per picture` : 'No picture', s.connected ? 'ok' : 'bad'],
-    ['Pictures dropped', s.dropped, ''],
-    ['Gimbal', s.angles ? 'Connected' : (s.error || 'Not connected'), s.angles ? 'ok' : (s.error ? 'bad' : 'na')],
-    ['Depth layer', !s.view.depth ? 'Off' : d ? `${d.fps} fps, ${d.ms} ms per picture` : (s.depth_error || 'Loading'), s.view.depth ? (d ? 'ok' : 'warn') : 'na'],
-    ['Depth error', s.depth_error || 'None', s.depth_error ? 'bad' : 'na'],
-    ['Target color', s.armed ? 'Set' : 'Not set', s.armed ? 'ok' : 'na'],
-    ['QNX tracker + interlock', (s.qnx && s.qnx.present) ? `answering, ${s.qnx.proc_ms} ms per picture, ${s.qnx.used ? 'in use' : 'not in use'}` : 'not answering',
-      (s.qnx && s.qnx.used) ? 'ok' : (s.qnx && s.qnx.present) ? 'warn' : 'na'],
-    ['Control round trip, UDP channel', (s.qnx && s.qnx.rtt && s.qnx.rtt.udp && s.qnx.rtt.udp.n) ? `${s.qnx.rtt.udp.p50} ms typical, ${s.qnx.rtt.udp.p95} ms slowest 5%` : (s.qnx && s.qnx.present ? 'no answers (firewall?)' : '-'), (s.qnx && s.qnx.rtt && s.qnx.rtt.udp && s.qnx.rtt.udp.n) ? 'ok' : 'na'],
-    ['Control round trip, video stream', (s.qnx && s.qnx.rtt && s.qnx.rtt.stream && s.qnx.rtt.stream.n) ? `${s.qnx.rtt.stream.p50} ms typical, ${s.qnx.rtt.stream.p95} ms slowest 5%` : '-', 'na'],
-    ['QNX link watchdog', (s.qnx && s.qnx.present) ? (s.qnx.link ? 'heartbeat ok' : 'LINK LOST: QNX disarmed the turret') : '-', (s.qnx && s.qnx.present) ? (s.qnx.link ? 'ok' : 'bad') : 'na'],
-    ['Distance sensor', 'Not connected', 'na'],
-    ['IR emitter / receiver', 'Not connected', 'na'],
-  ]);
+/* Turn the raw numbers into tiles (one per subsystem), a ranked list of issues, and an overall verdict.
+   state: ok (good), warn (works but degraded), bad (broken), off (not in use, not a problem). */
+function assess() {
+  const s = S;
+  if (!s) return null;
+  const q = s.qnx || {}, cam = s.camera || {}, rtt = q.rtt || {}, st = TEL ? TEL.stats : null;
+  const udp = rtt.udp && rtt.udp.n ? rtt.udp : null, gap = st && st.interval_ms && st.interval_ms.n ? st.interval_ms : null;
+  const onPi = s.source === 'Pi', noPic = !s.connected || s.frame_age > 2.5;
+  const tiles = [], issues = [];
+  const tile = (name, state, value, sub) => tiles.push({ name, state, value, sub });
+  const issue = (sev, title, why, fix) => issues.push({ sev, title, why, fix });
+
+  // Camera
+  if (noPic) {
+    const gone = cam.state === 'stalled' && cam.usb === false;
+    tile('Camera', 'bad', gone ? 'not detected' : 'no picture', onPi ? 'on the Pi' : s.source);
+    issue('bad', gone ? 'The Pi cannot see its camera' : 'No pictures are arriving',
+      gone ? 'The camera has dropped off the Pi\'s USB, so there is no video, tracking or depth.'
+           : cam.state === 'stalled' ? 'The Pi sees the camera but nothing is coming from it.' : `Nothing has arrived from ${onPi ? 'the Pi' : s.source} for ${Math.round(s.frame_age)} s.`,
+      gone ? 'Unplug the camera and plug it back in firmly.' : onPi ? 'Check the camera cable, then the hotspot and the Pi\'s power.' : 'Check the camera is not used by another program.');
+  } else if (s.fps < 10) {
+    tile('Camera', 'warn', `${s.fps} fps`, 'slow, normal is 15');
+    issue('warn', 'The camera is slow', `Only ${s.fps} pictures per second are arriving (normal is about 15).`, 'Add light to the scene, or check the link.');
+  } else tile('Camera', 'ok', `${s.fps} fps`, `${s.kb} KB per picture`);
+
+  // Video link (the Wi-Fi)
+  if (!onPi) tile('Video link', 'off', 'not used', s.source);
+  else if (noPic) tile('Video link', 'bad', 'down', '');
+  else if (gap) {
+    const bad = gap.p95 >= 500, warn = gap.p95 >= 150;
+    tile('Video link', bad ? 'bad' : warn ? 'warn' : 'ok', ms(gap.p50), `worst 5%: ${ms(gap.p95)}`);
+    if (warn) issue(bad ? 'bad' : 'warn', 'Video arrives in bursts',
+      `Pictures are sometimes ${Math.round(gap.p95)} ms apart (worst ${Math.round(gap.max)} ms), usually Wi-Fi congestion on the hotspot. ` +
+      (udp && udp.p95 < 50 ? 'Aiming is not affected: it uses the fast control channel.' : 'Aiming may be affected as well.'),
+      'Move the laptop closer to the Pi, or use a separate 2.4 GHz network (phone hotspot or router).');
+  } else tile('Video link', 'off', 'measuring', '');
+
+  // QNX brain
+  if (!onPi) tile('QNX brain', 'off', 'not used', 'laptop webcam');
+  else if (q.present && q.used) tile('QNX brain', 'ok', `${q.proc_ms} ms`, `${q.state}${q.armed ? ' ARMED' : ''}, tracking`);
+  else if (q.present && !s.armed) tile('QNX brain', 'ok', 'standby', 'pick a target to start');
+  else if (q.present && !s.view.qnx) tile('QNX brain', 'off', 'switched off', 'laptop tracker in use');
+  else if (q.present && s.preset !== 'teal' && s.preset !== 'blue') tile('QNX brain', 'off', 'laptop', 'a clicked target');
+  else if (q.present) { tile('QNX brain', 'warn', 'not tracking', 'laptop tracker in use'); issue('warn', 'QNX is not tracking', 'The Pi is answering, but its answers are too old to use, so the laptop tracker has taken over.', 'Check the Wi-Fi link; this clears by itself when answers are fresh again.'); }
+  else { tile('QNX brain', 'bad', 'not answering', 'the Pi'); issue('bad', 'The QNX tracker is not answering', 'The program on the Pi (the tracker and the safety interlock) is not reporting, so the laptop tracker is the fallback and the watchdog is not protecting you.', 'Check the Pi is on and the camera is plugged in, then restart the dashboard.'); }
+
+  // Control link (UDP)
+  if (!onPi || !q.present) tile('Control link', 'off', onPi ? 'no QNX' : 'not used', '');
+  else if (!udp) { tile('Control link', 'bad', 'no answers', 'UDP channel'); issue('bad', 'The fast control channel is silent', 'The dashboard is not getting UDP answers from the Pi (a firewall may be blocking them), so control rides the slow video stream.', 'Allow Python through the Windows firewall for private networks.'); }
+  else {
+    const bad = udp.p95 >= 100, warn = udp.p95 >= 30;
+    tile('Control link', bad ? 'bad' : warn ? 'warn' : 'ok', ms(udp.p50), `worst 5%: ${ms(udp.p95)}`);
+    if (warn) issue(bad ? 'bad' : 'warn', 'The control link is slow', `Control messages take up to ${Math.round(udp.p95)} ms round trip.`, 'Check Wi-Fi quality between the laptop and the Pi.');
+  }
+  if (q.present && q.link === false) issue('bad', 'QNX lost the laptop and disarmed the turret', 'The watchdog on the Pi stopped getting heartbeats and put the turret in its safe state.', 'Check the link, then arm again when it is back.');
+
+  // Gimbal
+  if (s.error && /gimbal/i.test(s.error)) { tile('Gimbal', 'bad', 'error', 'see below'); issue('bad', 'The gimbal is not responding', s.error, 'Check the ESP is plugged in and powered, and nothing else holds the port.'); }
+  else if (s.angles) tile('Gimbal', 'ok', `${s.angles[0]}° / ${s.angles[1]}°`, 'pan / tilt');
+  else tile('Gimbal', 'off', 'off', 'opens on Start tracking');
+
+  // Depth AI
+  if (s.depth_error) { tile('Depth AI', 'bad', 'error', ''); issue('warn', 'Depth failed to start', s.depth_error, 'Close other programs to free memory, then switch Depth on again.'); }
+  else if (!s.view.depth && !s.view.depthcheck && !s.view.cutout) tile('Depth AI', 'off', 'off', 'switch on in Layers');
+  else if (s.depth && s.depth.fps < 5) { tile('Depth AI', 'warn', `${s.depth.fps} fps`, `${s.depth.ms} ms each`); }
+  else tile('Depth AI', 'ok', s.depth ? `${s.depth.fps} fps` : 'loading', s.depth ? `${s.depth.ms} ms each` : '');
+
+  // This computer
+  const free = SYS ? SYS.ram_free_gb : null;
+  if (free == null) tile('This computer', 'off', '…', '');
+  else {
+    const bad = free < 1.0, warn = free < 1.6;
+    tile('This computer', bad ? 'bad' : warn ? 'warn' : 'ok', `${free} GB free`, `server ${SYS.process_mb} MB, CPU ${SYS.cpu_process_pct}%`);
+    if (warn) issue(bad ? 'bad' : 'warn', 'The laptop is short of memory', `Only ${free} GB is free. A hotspot or the depth AI can stall when memory runs low.`, 'Close Fusion 360, the QNX Software Center and extra Chrome tabs.');
+  }
+
+  issues.sort((a, b) => (a.sev === 'bad' ? 0 : 1) - (b.sev === 'bad' ? 0 : 1));
+  const bads = tiles.filter(t => t.state === 'bad').length, warns = tiles.filter(t => t.state === 'warn').length;
+  const verdict = bads ? { state: 'bad', title: 'Not ready', sub: issues.filter(i => i.sev === 'bad').map(i => i.title).slice(0, 2).join(' · ') }
+    : warns ? { state: 'warn', title: 'Degraded', sub: issues.map(i => i.title).slice(0, 2).join(' · ') || 'Running with reduced performance' }
+    : { state: 'ok', title: 'All systems go', sub: 'Camera, link and tracker are healthy' };
+  return { tiles, issues, verdict };
 }
 
-function renderSystem(x) {
-  if (!x) return;
-  const free = x.ram_free_gb;
-  rows('sys', [
-    ['Memory free', x.ram_free_gb == null ? '–' : `${x.ram_free_gb} of ${x.ram_total_gb} GB`, free != null && free < 1.5 ? 'warn' : ''],
-    ['Server memory', x.process_mb == null ? '–' : x.process_mb + ' MB', ''],
-    ['Server CPU', x.cpu_process_pct == null ? '–' : x.cpu_process_pct + '%', ''],
-    ['Uptime', Math.floor(x.uptime_s / 60) + ' min', ''],
-    ['Python', x.python, ''],
-  ]);
+function budget() {
+  const s = S, q = s.qnx || {}, rtt = q.rtt || {}, st = TEL ? TEL.stats : null;
+  const parts = [];
+  if (q.used && q.proc_ms != null) parts.push(['QNX tracking', q.proc_ms, '#b6e23a']);
+  if (rtt.udp && rtt.udp.n) parts.push(['Control link', rtt.udp.p50, '#ffb000']);
+  if (st && st.proc_ms && st.proc_ms.n) parts.push(['Laptop processing', st.proc_ms.p50, '#8b9777']);
+  if (TEL && TEL.servo_rtt_ms != null) parts.push(['Servo command', TEL.servo_rtt_ms, '#4fd6c4']);
+  return parts;
+}
+
+function render() {
+  const a = assess();
+  if (!a) { $('v-title').textContent = 'Server not reachable'; $('verdict').className = 'verdict bad'; $('tiles').innerHTML = ''; return; }
+  $('verdict').className = 'verdict ' + a.verdict.state;
+  $('v-title').textContent = a.verdict.title;
+  $('v-sub').textContent = a.verdict.sub;
+  $('tiles').innerHTML = a.tiles.map(t => `<div class="tile ${t.state}"><div class="n">${t.name}</div><div class="v">${t.value}</div><div class="s">${t.sub || '&nbsp;'}</div></div>`).join('');
+  $('issues').innerHTML = a.issues.length
+    ? a.issues.map(i => `<li class="${i.sev}"><b>${i.title}</b><span class="why">${i.why}</span><span class="fix">Fix: ${i.fix}</span></li>`).join('')
+    : '<div class="clear">Nothing needs attention<small>Everything that is switched on is working.</small></div>';
+  const s = S, q = s.qnx || {}, st = TEL ? TEL.stats : null, rtt = q.rtt || {};
+  const gap = st && st.interval_ms && st.interval_ms.n ? st.interval_ms : null;
+  const kpi = (state, num, lab) => `<div class="kpi ${state}"><div class="num">${num}</div><div class="lab">${lab}</div></div>`;
+  const tilesBy = Object.fromEntries(a.tiles.map(t => [t.name, t.state]));
+  $('kpis').innerHTML = kpi(tilesBy['Camera'] || 'off', s.connected ? `${s.fps}` : '–', 'video fps') +
+    kpi(tilesBy['Video link'] || 'off', gap ? ms(gap.p95).replace(' ms', '') : '–', 'slowest 5% gap, ms') +
+    kpi(tilesBy['QNX brain'] || 'off', q.present && q.used ? q.proc_ms : '–', 'QNX tracker, ms') +
+    kpi(tilesBy['Control link'] || 'off', rtt.udp && rtt.udp.n ? rtt.udp.p50 : '–', 'control link, ms');
+  const parts = budget(), total = parts.reduce((x, p) => x + p[1], 0);
+  const big = parts.length ? parts.reduce((m, p) => (p[1] > m[1] ? p : m)) : null;
+  const videoLate = gap ? gap.p95 : 0;
+  $('bottleneck-text').textContent = !s.connected ? 'No pictures are arriving, so nothing else can be measured.'
+    : videoLate > Math.max(40, total * 2) ? `Video delivery over Wi-Fi: pictures can be ${Math.round(videoLate)} ms apart. Aiming does not wait for video (the control loop is about ${ms(total)}).`
+    : big ? `The control loop is about ${ms(total)} end to end, mostly ${big[0].toLowerCase()} (${ms(big[1])}).` : 'Waiting for data.';
+  $('budget-total').textContent = parts.length ? `about ${ms(total)}` : 'waiting for data';
+  $('budget').innerHTML = parts.map(([n, v, c]) => `<i title="${n}" style="width:${Math.max(1, v / total * 100)}%;background:${c}"></i>`).join('');
+  const biggest = parts.length ? parts.reduce((m, p) => (p[1] > m[1] ? p : m)) : null;
+  $('budget-legend').innerHTML = parts.map(([n, v, c]) => `<span style="--c:${c}">${n} <b>${ms(v)}</b>${biggest && biggest[0] === n && parts.length > 1 ? ' (biggest)' : ''}</span>`).join('') || '<span style="--c:#333b27">no control-loop data yet</span>';
+  const cmpMax = Math.max(1, (rtt.udp && rtt.udp.p95) || 0, (rtt.stream && rtt.stream.p95) || 0);
+  const bar = (label, r, color) => r && r.n ? `<div><span>${label}</span><span class="track"><i style="width:${Math.max(2, r.p95 / cmpMax * 100)}%;background:${color}"></i></span><span class="val">${ms(r.p50)} · slowest ${ms(r.p95)}</span></div>` : `<div><span>${label}</span><span class="track"></span><span class="val dim">no data</span></div>`;
+  $('cmp').innerHTML = bar('Own channel', rtt.udp, '#b6e23a') + bar('Inside video', rtt.stream, '#ffb000');
+  $('gap-now').textContent = gap ? `typical ${ms(gap.p50)}, slowest 5% ${ms(gap.p95)}` : '–';
+  const rd = (k, v, cls) => `<tr><th>${k}</th><td class="${cls || ''}">${v}</td></tr>`;
+  const cam = s.camera || {};
+  $('readings').innerHTML =
+    rd('Video source', s.source || 'Pi') + rd('Picture size', s.connected ? `${s.kb} KB` : '–') + rd('Pictures dropped', s.dropped) +
+    rd('Camera report', cam.state === 'ok' ? 'detected' : cam.state === 'stalled' ? (cam.usb === false ? 'not on USB' : 'silent') : 'none') +
+    rd('Target color', s.armed ? 'set' : 'not set') + rd('Confidence', s.confidence != null ? Math.round(s.confidence * 100) + '%' : '–') +
+    rd('Mission (QNX)', q.present ? `${q.state}${q.armed ? ', ARMED' : ''}, shots ${q.shots}` : '–') +
+    rd('Distance sensor', 'not connected', 'na') + rd('IR emitter / receiver', 'not connected', 'na') +
+    (SYS ? rd('Uptime', Math.floor(SYS.uptime_s / 60) + ' min') + rd('Python', SYS.python) : '');
+  setStatus(s);
 }
 
 function renderTelemetry(t) {
-  if (!t) return;
-  const s = t.series, st = t.stats;
-  drawChart($('c-interval'), [{ v: s.interval_ms, color: '#2fb8a8' }]);
-  drawChart($('c-proc'), [{ v: s.proc_ms, color: '#2fb8a8' }]);
-  drawChart($('c-aim'), [{ v: s.pan, color: '#2fb8a8' }, { v: s.tilt, color: '#e0a030' }], [0, 180]);
-  drawChart($('c-speed'), [{ v: s.speed, color: '#2fb8a8' }]);
-  $('v-interval').textContent = fixed(last(s.interval_ms), 0); $('v-interval95').textContent = fixed(st.interval_ms.p95, 0);
-  $('v-proc').textContent = fixed(last(s.proc_ms), 1); $('v-proc95').textContent = fixed(st.proc_ms.p95, 1);
-  const qe = (S && S.qnx && S.qnx.events || []).map(([ago, text]) => [ago, 'QNX: ' + text]);
-  const all = t.events.concat(qe).sort((a, b) => a[0] - b[0]);
-  $('log').innerHTML = all.length
-    ? all.map(([ago, text]) => `<div><span>${ago}s ago</span>${text}</div>`).join('')
-    : '<small>No events yet.</small>';
+  TEL = t;
+  if (t) {
+    drawChart($('c-gap'), [{ v: t.series.interval_ms, color: '#b6e23a' }]);
+    const qe = (S && S.qnx && S.qnx.events || []).map(([ago, text]) => [ago, 'QNX: ' + text]);
+    const all = t.events.concat(qe).sort((a, b) => a[0] - b[0]);
+    $('log').innerHTML = all.length ? all.map(([ago, text]) => `<div><span>${ago}s ago</span>${text}</div>`).join('') : '<small>No events yet.</small>';
+  }
+  render();
 }
 
-poll('/state', 500, renderState);
-poll('/system', 2000, renderSystem);
+poll('/state', 500, s => { S = s; render(); });
+poll('/system', 2000, x => { SYS = x; render(); });
 poll('/telemetry', 1000, renderTelemetry);
 </script>

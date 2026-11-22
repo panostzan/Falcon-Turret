@@ -67,6 +67,7 @@ ctl = {"tracking": False, "aimer": None, "error": None, "angles": None}
 ctl_lock = threading.Lock()
 
 
+last_frame_t = [time.time()]     # when a picture last arrived from the video source
 feed_ref = {"feed": None}         # the video source (set by capture_loop); the Pi's feed also carries the QNX side
 qnx_sync = {"t": 0.0, "arm_cmd": 0.0}
 
@@ -191,6 +192,15 @@ def depth_map(frame):
     return sm.current(now, thumb)
 
 
+def camera_summary():
+    """Why there may be no picture, for the dashboard: what the Pi says about its camera (fresh within 3 s), or nothing."""
+    f = feed_ref["feed"]
+    cam = getattr(f, "camera", None) if f else None
+    if cam and time.time() - getattr(f, "camera_at", 0.0) < 3.0:
+        return dict(cam, source="pi")
+    return {"state": "unknown", "source": "none"}
+
+
 def qnx_summary():
     """What the dashboard shows about the QNX side: is it answering, and what does it decide."""
     f = feed_ref["feed"]
@@ -203,6 +213,29 @@ def qnx_summary():
         age_s = time.time() - f.meta_at                   # both clocks below are the Pi's, so the difference is exact
         out["events"] = [[round(max(0.0, (m["t_ms"] - t) / 1000.0) + age_s, 1), text] for t, text in f.events[-8:]]
     return out
+
+
+_track_log = {"found": None, "qnx": None, "t": 0.0}
+TRACK_LOG = os.path.join(HERE, "..", "captures", "tracking_log.txt")
+
+
+def log_tracking_change(found, qnx, conf, now):
+    """Diagnostics: one line each time the target is found or lost, or the tracker in use switches between QNX and the laptop.
+    Written to captures/tracking_log.txt (kept short: it stops at about 2000 lines)."""
+    last = _track_log
+    if (found, qnx) == (last["found"], last["qnx"]):
+        return
+    gap = now - last["t"] if last["t"] else 0.0
+    last.update(found=found, qnx=qnx, t=now)
+    try:
+        os.makedirs(os.path.dirname(TRACK_LOG), exist_ok=True)
+        if os.path.exists(TRACK_LOG) and os.path.getsize(TRACK_LOG) > 100_000:
+            return
+        with open(TRACK_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%H:%M:%S')}.{int((now % 1) * 1000):03d} found={int(found)} tracker={'QNX' if qnx else 'laptop'} "
+                    f"conf={conf:.2f} (after {gap:.2f} s in the previous state)\n")
+    except OSError:
+        pass
 
 
 def cutout_active():
@@ -365,6 +398,7 @@ def process(jpg, ts=None):
         if ctl["aimer"]:
             ctl["aimer"].reset()
     send_pi(f"aim {1 if info['settled'] else 0} {info['speed']:.1f}")
+    log_tracking_change(found, qs is not None if tracker.armed else False, tracker.confidence, now)
     tracking = ctl["tracking"] and tracker.armed
     _, scan_goal = engage.update(now, tracking, found, info["settled"], info["speed"],
                                  tracker.confidence if found else 0.0)
@@ -386,6 +420,7 @@ def capture_loop():
             continue
         seq, ts, jpg = item
         last_frame = time.time()
+        last_frame_t[0] = last_frame
         age_ms = (last_frame - ts) * 1000     # how long the frame waited before we got to it
         t_proc = time.perf_counter()
         jpg, found = process(jpg, ts)
@@ -475,7 +510,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/system":
             self._send(json.dumps(system_stats()).encode())
         elif self.path == "/state":
-            self._send(json.dumps(latest["state"]).encode())
+            self._send(json.dumps(dict(latest["state"], frame_age=round(time.time() - last_frame_t[0], 1), camera=camera_summary())).encode())
         elif self.path == "/telemetry":
             snap, now = telemetry.snapshot(), time.time()
             snap["events"] = [[round(now - t, 1), text] for t, text in list(engage.events)[-14:]]

@@ -18,7 +18,8 @@ function poll(url, ms, fn) {
 function setStatus(s) {
   const put = (id, cls, text) => { const el = $(id); if (el) { el.className = cls; el.textContent = text; } };
   if (!s) { put('st-video', 'bad', 'Server not reachable'); put('st-gimbal', '', ''); put('st-depth', '', ''); return; }
-  put('st-video', s.connected ? 'on' : 'bad', s.connected ? `${s.source || 'Video'}: ${s.fps} fps` : `${s.source || 'Video'}: no picture`);
+  const noPic = !s.connected || s.frame_age > 2.5;
+  put('st-video', noPic ? 'bad' : 'on', noPic ? `${s.source || 'Video'}: NO PICTURE` : `${s.source || 'Video'}: ${s.fps} fps`);
   put('st-gimbal', s.angles ? 'on' : s.error ? 'bad' : '', s.angles ? 'Gimbal connected' : s.error ? 'Gimbal error' : 'Gimbal idle');
   const d = s.depth;
   put('st-depth', s.view && s.view.depth ? (d && d.available ? 'on' : 'warn') : '', s.view && s.view.depth ? `Depth ${d ? d.fps : '–'} fps` : 'Depth off');

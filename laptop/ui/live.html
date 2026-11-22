@@ -15,6 +15,7 @@
     <div class="stage">
       <img id="video" alt="Live camera picture">
       <div id="badge" class="badge">Connecting…</div>
+      <div id="nosignal" class="nosignal" hidden><b>NO CAMERA SIGNAL</b><span id="nosignal-why"></span></div>
     </div>
     <div class="layers" id="layers" role="group" aria-label="Layers"></div>
     <div class="presets">Views
@@ -242,6 +243,13 @@ function render(s) {
     $('lost-where').textContent = lost ? lost.where + (lost.heading ? `, was moving ${lost.heading}` : '') : '–';
     $('lost-conf').textContent = lost ? Math.round(lost.pos_conf * 100) + '% (estimate)' : '–';
     $('lostbox').dataset.p = P;
+  }
+  const dead = !s.connected || s.frame_age > 2.5, cam = s.camera || {};
+  $('nosignal').hidden = !dead;
+  if (dead) {
+    $('nosignal-why').textContent = cam.state === 'stalled' && cam.usb === false ? 'The Pi does not detect its camera on USB. Unplug and replug the camera.'
+      : cam.state === 'stalled' ? 'The Pi detects the camera but no pictures are coming from it. Replug it or restart the stream.'
+      : s.source === 'Pi' ? `No pictures from the Pi for ${Math.round(s.frame_age)} s (the link or the Pi itself).` : `${s.source} is not delivering pictures.`;
   }
   const badge = $('badge'); let text, cls = '';
   if (!s.connected) text = 'No picture';

@@ -212,6 +212,27 @@ def test_aim_loop():
     print("aim loop pieces ok")
 
 
+def test_camera_status():
+    """The Pi's camera report ('C ...') is parsed, kept fresh for 3 s, and summarised for the dashboard."""
+    assert receiver.parse_camera("C ok 0.1") == {"state": "ok", "age": 0.1, "usb": None}
+    assert receiver.parse_camera("E 1 x\nC stalled 7.5 nousb") == {"state": "stalled", "age": 7.5, "usb": False}
+    assert receiver.parse_camera("C stalled 3.0 usb")["usb"] is True
+    assert receiver.parse_camera("C stalled 3.0 unknown")["usb"] is None
+    assert receiver.parse_camera("C bogus 1") is None and receiver.parse_camera("T 1 2 3") is None and receiver.parse_camera("C ok x") is None
+    feed = receiver.FrameFeed.__new__(receiver.FrameFeed)
+    feed.meta, feed.events, feed._pings, feed.rtt_ms, feed.camera, feed.camera_at = None, [], {}, {"udp": [], "stream": []}, None, 0.0
+    feed._meta_cv = __import__("threading").Condition()
+    feed._on_meta("C stalled 4.0 nousb", via="udp")
+    app.feed_ref["feed"] = feed
+    cam = app.camera_summary()
+    assert cam["state"] == "stalled" and cam["usb"] is False and cam["source"] == "pi", cam
+    feed.camera_at = time.time() - 10
+    assert app.camera_summary()["state"] == "unknown", "an old report is not shown as current"
+    app.feed_ref["feed"] = None
+    assert app.camera_summary()["state"] == "unknown"
+    print("camera status ok")
+
+
 def test_app():
     jpg = cv2.imencode(".jpg", np.full((480, 640, 3), 90, np.uint8))[1].tobytes()   # NOTHING teal in the picture
     ff = FakeFeed(meta())
@@ -271,5 +292,6 @@ if __name__ == "__main__":
     test_stream()
     test_udp_channel()
     test_aim_loop()
+    test_camera_status()
     test_app()
     print("qnx stream tests passed")

@@ -81,6 +81,11 @@ small, .dim { color: var(--dim); }
 #lostbox[data-p="OCCLUDED"] h2, #lostbox[data-p="REACQUIRING"] h2 { color: var(--warn); }
 .hint { color: var(--dim); margin: 0; font-size: 12px; }
 
+.nosignal { position: absolute; inset: 0; z-index: 4; display: grid; place-content: center; gap: 10px; text-align: center; padding: 20px;
+  background: rgba(10, 12, 7, .82); }
+.nosignal b { font-size: 26px; letter-spacing: .25em; color: var(--alarm); }
+.nosignal span { color: var(--text); max-width: 460px; }
+
 /* controls */
 button, .btn {
   font: inherit; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--text); background: var(--raise);

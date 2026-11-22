@@ -90,6 +90,18 @@ def parse_pongs(text):
     return [line[2:].strip() for line in text.splitlines() if line.startswith("P ")]
 
 
+def parse_camera(text):
+    """The camera status line from the Pi ('C ok 0.1' or 'C stalled 5.3 usb|nousb|unknown'), or None. usb is True/False/None."""
+    for line in text.splitlines():
+        p = line.split()
+        if len(p) >= 3 and p[0] == "C" and p[1] in ("ok", "stalled"):
+            try:
+                return {"state": p[1], "age": float(p[2]), "usb": (p[3] == "usb") if len(p) > 3 and p[3] in ("usb", "nousb") else None}
+            except ValueError:
+                return None
+    return None
+
+
 def parse_meta(text):
     """turretd's lines -> (status, events). status is a dict from the newest 'T' line (or None); events are (t_ms, text).
     T line: T seq t_ms found cx cy w h confidence state armed shots link proc_us scan_pan"""
@@ -159,6 +171,7 @@ class FrameFeed:
         self.events = []                             # (t_ms, text) from turretd, newest last
         self._proc = None
         self._pings = {}                             # probe id -> time sent
+        self.camera, self.camera_at = None, 0.0       # the Pi's report on its camera (None until it says something)
         self._meta_cv = threading.Condition()        # signalled when a newer turretd status arrives
         self.rtt_ms = {"udp": deque(maxlen=120), "stream": deque(maxlen=120)}
         self._probe_n = 0
@@ -181,6 +194,9 @@ class FrameFeed:
         if events:
             known = {e for e in self.events}
             self.events = (self.events + [e for e in events if e not in known])[-40:]
+        cam = parse_camera(text)
+        if cam:
+            self.camera, self.camera_at = cam, time.time()
         now = time.time()
         for pid in parse_pongs(text):
             sent = self._pings.pop(pid, None)
@@ -293,6 +309,7 @@ class CameraFeed:
     def __init__(self, index, quality=90):
         self.index, self.quality, self.error, self.dropped = index, quality, None, 0
         self.meta, self.events = None, []             # no QNX behind a laptop webcam
+        self.camera, self.camera_at = None, 0.0
         self._cv = threading.Condition()
         self._latest, self._seq, self._consumed = None, 0, 0
         threading.Thread(target=self._run, daemon=True).start()
