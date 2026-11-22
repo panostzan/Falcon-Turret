@@ -9,6 +9,7 @@ Servos have no position feedback, so the angles are the last values commanded.
 import re
 import socket
 import threading
+import os
 import time
 from collections import deque
 
@@ -17,7 +18,24 @@ import serial
 PAN_RANGE = (0, 180)
 TILT_RANGE = (0, 180)        # what the firmware accepts. The usable range is smaller and is a SOFTWARE limit: see tilt_limits below
 TILT_HOME = 22               # the firmware's start position for tilt
+LIFT_RANGE = (0, 150)        # the lift (platform) servo is never sent above 150 degrees. A SOFTWARE limit: see lift_limits below
 CENTER = (90, TILT_HOME)
+
+
+def default_lift_limits():
+    """The software limit on the lift servo: laptop/lift_calibration.json if the operator saved one with tools/servo_sliders.py
+    (Mark lift LOW / HIGH), else 0-150."""
+    import json
+    path = os.environ.get("TURRET_LIFT_CALIBRATION") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lift_calibration.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            cal = json.load(f)
+        lo, hi = int(cal["low"]), int(cal["high"])
+        if 0 <= lo < hi <= 180:
+            return (lo, hi)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return LIFT_RANGE
 
 
 def default_tilt_limits():
@@ -69,12 +87,13 @@ def _clamp(v, lo, hi):
 
 
 class Gimbal:
-    def __init__(self, port=None, baud=115200, link=None, settle_s=2.0, tilt_limits=None):
+    def __init__(self, port=None, baud=115200, link=None, settle_s=2.0, tilt_limits=None, lift_limits=None):
         """port: 'COM8' (USB serial, the Feather M0) or 'udp:192.168.137.50' (Wi-Fi firmware).
         link: a pre-opened serial-like object (used by tests).
         tilt_limits: (low, high) the tilt is never commanded outside. Default: the saved calibration, else 0-45. Pass
         TILT_RANGE for no limit (the calibration tool does)."""
         self.tilt_limits = tuple(tilt_limits) if tilt_limits else default_tilt_limits()
+        self.lift_limits = tuple(lift_limits) if lift_limits else default_lift_limits()   # the lift never goes outside this
         if link is None and str(port).startswith("udp:"):
             link = UdpLink(port[4:])
         elif link is None:
@@ -129,14 +148,14 @@ class Gimbal:
 
     def move_to(self, pan=None, tilt=None, lift=None):
         """Absolute move. Sends only the axes that actually change (and always the first command to an axis, which is what
-        energises a limp servo); angles are clamped to safe ranges. `lift` is the platform servo, 0-180, no other limit."""
+        energises a limp servo); angles are clamped to safe ranges. `lift` is the platform servo (software limit 0-150)."""
         if pan is not None and ((p := _clamp(pan, *PAN_RANGE)) != self.pan or "P" not in self._sent):
             self._send(f"P{p}")
             self._sent.add("P")
         if tilt is not None and ((t := _clamp(tilt, *self.tilt_limits)) != self.tilt or "T" not in self._sent):
             self._send(f"T{t}")
             self._sent.add("T")
-        if lift is not None and ((l := _clamp(lift, 0, 180)) != self.lift or "L" not in self._sent):
+        if lift is not None and ((l := _clamp(lift, *self.lift_limits)) != self.lift or "L" not in self._sent):
             self._send(f"L{l}")
             self._sent.add("L")
         return self.pan, self.tilt

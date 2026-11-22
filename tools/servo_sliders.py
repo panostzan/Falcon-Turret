@@ -2,7 +2,7 @@
 
     python tools/servo_sliders.py        (the dashboard server must not be tracking: it would be holding the port)
 
-  Pan, Tilt and Lift sliders   drag to move; the number is the angle being COMMANDED (0-180 each, no limits here).
+  Pan, Tilt and Lift sliders   drag to move; the number is the angle being COMMANDED (pan and tilt 0-180, lift 0-150).
                                Pan and tilt use the same angles as the ESP32 setup did, so their numbers mean the same.
   Arrow keys                   with a slider selected, nudge it by 1 degree (PageUp/PageDown: 10)
   Centre                       pan 90, tilt 22, lift 90, and energises all three (they jump there: keep the arms off for the first test)
@@ -22,13 +22,12 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "laptop"))
-from gimbal import CENTER, PAN_RANGE, TILT_RANGE   # noqa: E402
+from gimbal import CENTER, LIFT_RANGE, PAN_RANGE, TILT_RANGE   # noqa: E402
 import tilt_calibration                            # noqa: E402
 
 LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "captures", "servo_sliders.log")
 LIFT_CAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "laptop", "lift_calibration.json")
-LIFT_RANGE = (0, 180)
-LIFT_HOME = 90
+LIFT_HOME = 90                                    # the lift goes 0 to 150 (a software limit, see gimbal.LIFT_RANGE)
 UPDATE_MS = 30
 AXES = ("pan", "tilt", "lift")
 RANGES = {"pan": PAN_RANGE, "tilt": TILT_RANGE, "lift": LIFT_RANGE}
@@ -221,7 +220,7 @@ def run_window(port):
         root.after(UPDATE_MS, tick)
 
     try:
-        gimbal = Gimbal(port, tilt_limits=TILT_RANGE)        # no limits: this tool is for finding out what the servos do
+        gimbal = Gimbal(port, tilt_limits=TILT_RANGE, lift_limits=LIFT_RANGE)   # no limits on tilt (this tool finds the ends); lift stops at 150
         pan, tilt = gimbal.status()
     except Exception as e:
         status.config(text=f"could not open {port}: {e}", fg="#ff4b2b")

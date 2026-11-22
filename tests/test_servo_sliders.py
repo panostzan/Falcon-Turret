@@ -4,6 +4,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 os.environ["TURRET_TILT_CALIBRATION"] = "none.json"
+os.environ["TURRET_LIFT_CALIBRATION"] = "none.json"
 sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 sys.path.insert(0, os.path.join(HERE, "..", "laptop"))
 import servo_sliders as ss   # noqa: E402
@@ -42,7 +43,7 @@ def test():
     c.set_target("tilt", 500)                                # clamped to what the servo takes
     c.set_target("pan", -40)
     c.set_target("lift", 300)
-    assert c.target == {"pan": 0, "tilt": 180, "lift": 180}
+    assert c.target == {"pan": 0, "tilt": 180, "lift": 150}, "the lift stops at 150"
     g.sent.clear()
     c.update()
     assert g.sent == [{"pan": 144}, {"tilt": 28}, {"lift": 96}], g.sent      # all three move together, each limited to the step

@@ -1,7 +1,8 @@
 """Tests Gimbal against a simulated ESP32 that follows the firmware's protocol (no hardware needed).
 Run: python tests/test_gimbal.py"""
 import os
-os.environ["TURRET_TILT_CALIBRATION"] = "none.json"   # never read the operator's real calibration in a test
+os.environ["TURRET_TILT_CALIBRATION"] = "none.json"
+os.environ["TURRET_LIFT_CALIBRATION"] = "none.json"   # never read the operator's real calibration in a test
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "laptop"))
@@ -102,7 +103,10 @@ def test_feather():
     g.move_to(lift=140)
     assert g.lift == 140 and f.angle[2] == 140 and f.log[-1] == "L140"
     g.move_to(lift=999)
-    assert f.angle[2] == 180, "the lift goes up to 180 and no further"
+    assert f.angle[2] == 150, "the lift goes up to 150 and no further (a software limit)"
+    wide = Gimbal(link=FakeFeather(), lift_limits=(0, 180))
+    wide.move_to(lift=999)
+    assert wide.lift == 180, "the limit can be widened when asked"
     g.release()
     assert f.energised == [False] * 3 and f.log[-1] == "O"
     g.move_to(pan=90)
