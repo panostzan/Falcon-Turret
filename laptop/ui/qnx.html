@@ -93,7 +93,7 @@
       <div class="link air" id="l-3"><span id="x-udp">UDP</span></div>
       <div class="node" id="n-lap"><div class="tag">Windows laptop</div><div class="nm">Aim loop</div><div class="val" id="v-lap">–</div><div class="sub" id="s-lap">&nbsp;</div></div>
       <div class="link" id="l-4"><span id="x-usb">USB</span></div>
-      <div class="node" id="n-fea"><div class="tag">Feather M0</div><div class="nm">Servo driver</div><div class="val" id="v-fea">–</div><div class="sub" id="s-fea">&nbsp;</div></div>
+      <div class="node" id="n-fea"><div class="tag" id="t-fea">Feather M0</div><div class="nm">Servo driver</div><div class="val" id="v-fea">–</div><div class="sub" id="s-fea">&nbsp;</div></div>
       <div class="link" id="l-5"><span>I²C</span></div>
       <div class="node" id="n-ser"><div class="tag">PCA9685</div><div class="nm">Servos</div><div class="val">3 axes</div><div class="sub">pan · tilt · lift</div></div>
     </div>
@@ -241,8 +241,9 @@ function render(q) {
   $('v-lap').textContent = d.present ? d.state : '–';
   $('s-lap').textContent = d.present ? (d.armed ? 'ARMED' : 'disarmed') : 'no answer';
   const ang = gim.angles;
-  $('v-fea').textContent = ang ? `P${ang[0]} T${ang[1]}` : 'idle';
-  $('s-fea').textContent = ang ? (gim.rtt != null ? 'reply ' + f1(gim.rtt) + ' ms' : 'tracking') : 'not tracking';
+  $('v-fea').textContent = ang ? `Pan ${ang[0]}°` : 'idle';
+  $('s-fea').textContent = ang ? `Tilt ${ang[1]}°` : 'not tracking';
+  $('t-fea').textContent = ang && gim.rtt != null ? `Feather M0 · ${f1(gim.rtt)} ms` : 'Feather M0';
   $('x-usb').textContent = ang ? 'USB serial' : 'USB';
   $('l-4').classList.toggle('off', !ang); $('l-5').classList.toggle('off', !ang);
   const live = !!(fps && q.camera && q.camera.state !== 'stalled');
