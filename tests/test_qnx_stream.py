@@ -251,6 +251,13 @@ def test_app():
     assert any(l.startswith("aim ") for l in ff.sent)
     assert app.qnx_summary()["used"] and app.qnx_summary()["state"] == "TRACK"
 
+    small = cv2.imencode(".jpg", np.full((360, 480, 3), 90, np.uint8))[1].tobytes()     # the dashboard picture can be 480x360
+    ff.meta = meta(cx=320.0, cy=240.0, w=80.0, h=60.0)                                   # the Pi reports in its 640x480 picture
+    app.view["mirror"] = False
+    app.last_seen.reset()
+    app.process(small, 100.05)
+    assert app.last_seen.box == (240.0, 180.0, 60.0, 45.0), app.last_seen.box            # scaled by 3/4 onto the smaller picture
+    ff.meta = meta()
     app.view["mirror"] = True                              # the picture is mirrored for display: so is the answer
     app.last_seen.reset()
     app.process(jpg, 100.1)

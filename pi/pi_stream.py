@@ -23,9 +23,12 @@ import sys
 import threading
 import time
 
+from shrink import shrink_planes      # lives next to this file on the Pi (~/bin/shrink.py)
+
 UNIT = "5"
 FPS = sys.argv[1] if len(sys.argv) > 1 else "30"
 QUALITY = int(sys.argv[2]) if len(sys.argv) > 2 else 90
+DISPLAY = sys.argv[3] if len(sys.argv) > 3 else "full"   # "full" = the picture as captured (640x480); "480" = 480x360 for the dashboard
 POLL_S = 0.012                      # file poll interval (polling too often slows the recorder)
 ROTATE_S = 20                       # start a replacement recorder this often
 DIR = "/data/share/sensor"
@@ -47,10 +50,16 @@ TJSAMP_422, TJFLAG_FASTDCT = 1, 2048
 
 
 def encode(raw):
-    """640x480 YUY2 -> JPEG bytes (planar 4:2:2 handed straight to libturbojpeg)."""
-    planar = raw[0::2] + raw[1::4] + raw[3::4]          # Y plane, U plane, V plane
+    """640x480 YUY2 -> JPEG bytes (planar 4:2:2 handed straight to libturbojpeg). With DISPLAY = "480" the picture sent to the
+    laptop is shrunk to 480x360 first (the tracker on this Pi still works from the full-size picture)."""
+    y, u, v = raw[0::2], raw[1::4], raw[3::4]           # Y plane 640x480, U and V planes 320x480
+    width, height = SRC_W, SRC_H
+    if DISPLAY == "480":
+        y, u, v = shrink_planes(y, u, v, SRC_W, SRC_H)
+        width, height = SRC_W * 3 // 4, SRC_H * 3 // 4
+    planar = bytes(y) + bytes(u) + bytes(v)
     buf, size = ctypes.c_void_p(), ctypes.c_ulong()
-    rc = _tj.tjCompressFromYUV(ctypes.c_void_p(_handle), planar, SRC_W, 4, SRC_H, TJSAMP_422,
+    rc = _tj.tjCompressFromYUV(ctypes.c_void_p(_handle), planar, width, 4, height, TJSAMP_422,
                                ctypes.byref(buf), ctypes.byref(size), QUALITY, TJFLAG_FASTDCT)
     if rc != 0:
         raise RuntimeError("JPEG encode failed")
@@ -103,7 +112,7 @@ class Brain:
             for line in data.decode(errors="replace").splitlines():
                 if line.startswith("ping "):
                     try:
-                        self.udp.sendto(("P " + line[5:]).encode(), addr)
+                        self.udp.sendto((f"P {line[5:]} {time.monotonic() * 1000:.3f}").encode(), addr)
                     except OSError:
                         pass
                 elif line:
@@ -169,7 +178,7 @@ class Brain:
                 line, buf = buf.split(b"\n", 1)
                 if line.startswith(b"ping "):       # timing probe through the SSH stream: answered inside the stream
                     with self._cv:
-                        self._out.append("P " + line[5:].decode(errors="replace").strip())
+                        self._out.append("P " + line[5:].decode(errors="replace").strip() + f" {time.monotonic() * 1000:.3f}")
                     continue
                 try:
                     self.sock.sendto(line + b"\n", CONTROL)
@@ -256,6 +265,7 @@ class Recording:
 
 
 LAST_FRAME = [time.time()]          # when the newest picture was read; the status thread watches this
+STATS = {"frames": 0, "bytes": 0, "encode_s": 0.0}     # counted by the main loop, reported by the status thread
 
 
 def usb_has_device():
@@ -270,8 +280,16 @@ def usb_has_device():
 def camera_status(brain):
     """Once a second: 'C ok <age>' while pictures flow, 'C stalled <age> usb|nousb' when none arrived for 2 s, so the dashboard can
     say WHY there is no picture (camera not detected, or detected but silent)."""
+    last = (time.time(), time.process_time(), 0, 0, 0.0)
     while True:
         time.sleep(1.0)
+        now, cpu = time.time(), time.process_time()
+        frames, nbytes, enc = STATS["frames"], STATS["bytes"], STATS["encode_s"]
+        dt = now - last[0]
+        if dt > 0 and frames > last[2]:                      # V <pictures per second> <KB per picture sent> <encode ms> <this program's CPU %>
+            n = frames - last[2]
+            brain._push_udp(f"V {n / dt:.1f} {(nbytes - last[3]) / n / 1024:.1f} {(enc - last[4]) / n * 1000:.1f} {(cpu - last[1]) / dt * 100:.0f}")
+        last = (now, cpu, frames, nbytes, enc)
         age = time.time() - LAST_FRAME[0]
         if age < 2.0:
             brain._push_udp(f"C ok {age:.1f}")
@@ -312,9 +330,14 @@ def main():
                 raw = cur.read(n)
                 if len(raw) == FRAME:
                     LAST_FRAME[0] = time.time()
+                    stamp = f"F {time.monotonic() * 1000:.3f}"       # the Pi's clock when this picture was read: the laptop measures the trip
                     marker = brain.submit(raw)
+                    t_enc = time.perf_counter()
                     jpg = encode(raw)                       # turretd works on the same picture while this runs
-                    said = brain.take(marker, 0.02) if brain.ok else []
+                    STATS["encode_s"] += time.perf_counter() - t_enc
+                    STATS["frames"] += 1
+                    STATS["bytes"] += len(jpg)
+                    said = [stamp] + (brain.take(marker, 0.02) if brain.ok else [])
                     if said:
                         text = "\n".join(said).encode()
                         out.write(struct.pack("<I", META_FLAG | len(text)) + text)

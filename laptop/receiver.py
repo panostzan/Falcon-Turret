@@ -13,7 +13,8 @@ USER = "qnxuser"
 PI_MAC = "88-a2-9e-a9-a5-4e"           # the Pi's hardware address; its IP changes when the hotspot restarts
 FALLBACK_IP = "192.168.137.131"
 KEY = os.path.expanduser("~/.ssh/turret_ed25519")
-FPS, QUALITY = 30, 90   # recorder fps, JPEG quality (lower = smaller frames, faster)
+FPS, QUALITY = 30, int(os.environ.get("TURRET_QUALITY", "65"))   # recorder fps, JPEG quality (lower = smaller frames, faster)
+DISPLAY = os.environ.get("TURRET_DISPLAY", "480")   # picture size sent for display: "480" = 480x360, "full" = 640x480 (the Pi's tracker always uses the full picture)
 
 
 def _ssh_open(ip, timeout=1.5):
@@ -65,7 +66,7 @@ def _spawn(quality):
         ["ssh", "-i", KEY, "-o", "MACs=hmac-sha2-256", "-o", "BatchMode=yes",
          "-o", "ServerAliveInterval=5",
          # the Pi's IP changes, but its identity does not: trust its saved key under a fixed name, refuse any other host
-         "-o", "HostKeyAlias=qnxpi", "-o", "StrictHostKeyChecking=yes", f"{USER}@{current_ip[0]}", f"python3 ~/bin/pi_stream.py {FPS} {quality}"],
+         "-o", "HostKeyAlias=qnxpi", "-o", "StrictHostKeyChecking=yes", f"{USER}@{current_ip[0]}", f"python3 ~/bin/pi_stream.py {FPS} {quality} {DISPLAY}"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
 
 
@@ -100,8 +101,40 @@ MAX_PACKET = 8 * 1024 * 1024
 
 
 def parse_pongs(text):
-    """The 'P <id>' lines (answers to timing probes) in a block of text from the Pi."""
-    return [line[2:].strip() for line in text.splitlines() if line.startswith("P ")]
+    """The 'P <id> [<Pi clock ms>]' lines (answers to timing probes): a list of (id, Pi clock in ms or None)."""
+    out = []
+    for line in text.splitlines():
+        p = line.split()
+        if len(p) >= 2 and p[0] == "P":
+            try:
+                out.append((p[1], float(p[2]) if len(p) > 2 else None))
+            except ValueError:
+                out.append((p[1], None))
+    return out
+
+
+def parse_stamp(text):
+    """The Pi's clock (ms) from an 'F <ms>' line that travels just ahead of each picture, or None."""
+    for line in text.splitlines():
+        p = line.split()
+        if len(p) == 2 and p[0] == "F":
+            try:
+                return float(p[1])
+            except ValueError:
+                return None
+    return None
+
+
+def parse_video_stats(text):
+    """The Pi's own video measurements ('V <pictures/s> <KB per picture> <encode ms> <CPU %>'), or None."""
+    for line in text.splitlines():
+        p = line.split()
+        if len(p) == 5 and p[0] == "V":
+            try:
+                return {"fps": float(p[1]), "kb": float(p[2]), "encode_ms": float(p[3]), "cpu_pct": float(p[4])}
+            except ValueError:
+                return None
+    return None
 
 
 def parse_camera(text):
@@ -189,6 +222,10 @@ class FrameFeed:
         self._proc = None
         self._pings = {}                             # probe id -> time sent
         self.camera, self.camera_at = None, 0.0       # the Pi's report on its camera (None until it says something)
+        self.pi_video, self.pi_video_at = None, 0.0   # the Pi's own video measurements (rate, size, encode time, CPU)
+        self._arrivals = deque(maxlen=600)            # (arrival time, bytes, delay in ms or None) of each picture at THIS end of the Wi-Fi
+        self._offsets = deque(maxlen=40)              # (round trip s, laptop clock minus Pi clock s) from the UDP pings
+        self._next_stamp = None                       # the Pi clock stamp of the picture about to arrive
         self._meta_cv = threading.Condition()        # signalled when a newer turretd status arrives
         self.rtt_ms = {"udp": deque(maxlen=120), "stream": deque(maxlen=120)}
         self._probe_n = 0
@@ -214,11 +251,19 @@ class FrameFeed:
         cam = parse_camera(text)
         if cam:
             self.camera, self.camera_at = cam, time.time()
+        pv = parse_video_stats(text)
+        if pv:
+            self.pi_video, self.pi_video_at = pv, time.time()
         now = time.time()
-        for pid in parse_pongs(text):
+        stamp = parse_stamp(text)
+        if stamp is not None:
+            self._next_stamp = stamp
+        for pid, pi_ms in parse_pongs(text):
             sent = self._pings.pop(pid, None)
             if sent is not None:
                 self.rtt_ms[via if via in self.rtt_ms else "stream"].append((now - sent) * 1000)
+                if via == "udp" and pi_ms is not None:               # clock offset: the Pi's reading was taken about half an RTT ago
+                    self._offsets.append((now - sent, (sent + now) / 2 - pi_ms / 1000.0))
 
     def _udp_loop(self):
         """Answers that come straight back over UDP (tracker status the moment it exists, timing probes)."""
@@ -246,6 +291,32 @@ class FrameFeed:
                 self.send(f"ping {pid}", path)
             for old in [p for p, t in self._pings.items() if time.time() - t > 5]:
                 del self._pings[old]                 # lost probes are forgotten, not counted
+
+    def _delay_ms(self, arrival):
+        """How long this picture took from the Pi reading it to arriving here, using the Pi's stamp and the clock offset measured
+        with the quickest recent UDP round trip (the most symmetric one). None until both exist."""
+        stamp, self._next_stamp = self._next_stamp, None
+        if stamp is None or not self._offsets:
+            return None
+        best = min(self._offsets)                                    # lowest round trip = most trustworthy offset
+        return (arrival - (best[1] + stamp / 1000.0)) * 1000.0
+
+    def wire_stats(self, window=30.0):
+        """What actually arrived over the Wi-Fi in the last `window` seconds: pictures per second, KB per picture, and the gaps
+        between pictures (median, 95th, 99th percentile, worst, and how many were over 200 ms). None before there is enough data."""
+        now = time.time()
+        pts = [p for p in list(self._arrivals) if now - p[0] <= window]
+        if len(pts) < 5:
+            return None
+        delays = sorted(p[2] for p in pts if p[2] is not None and -50 < p[2] < 5000)
+        gaps = sorted((b[0] - a[0]) * 1000 for a, b in zip(pts, pts[1:]))
+        pick = lambda q: round(gaps[min(len(gaps) - 1, int(len(gaps) * q))], 1)
+        span = pts[-1][0] - pts[0][0]
+        return {"n": len(pts), "fps": round((len(pts) - 1) / span, 1) if span > 0 else 0.0,
+                "kb": round(sum(p[1] for p in pts) / len(pts) / 1024, 1), "gap_p50": pick(0.5), "gap_p95": pick(0.95),
+                "gap_p99": pick(0.99), "gap_max": round(gaps[-1], 1), "over_200": sum(1 for g in gaps if g > 200),
+                "delay_p50": round(delays[len(delays) // 2], 1) if delays else None,
+                "delay_p95": round(delays[min(len(delays) - 1, int(len(delays) * 0.95))], 1) if delays else None}
 
     def rtt(self):
         """Round-trip times of the timing probes in ms: {path: {p50, p95, n}} for the UDP channel and the SSH stream."""
@@ -304,6 +375,7 @@ class FrameFeed:
         while True:                                  # whatever goes wrong, the reader keeps going: log it and reconnect
             try:
                 for ts, jpg in jpeg_frames(quality, self._on_meta, self._on_proc):
+                    self._arrivals.append((ts, len(jpg), self._delay_ms(ts)))
                     with self._cv:
                         if self._seq != self._consumed:     # the previous frame was never picked up
                             self.dropped += 1
@@ -334,6 +406,7 @@ class CameraFeed:
         self.index, self.quality, self.error, self.dropped = index, quality, None, 0
         self.meta, self.events = None, []             # no QNX behind a laptop webcam
         self.camera, self.camera_at = None, 0.0
+        self.pi_video, self.pi_video_at = None, 0.0
         self._cv = threading.Condition()
         self._latest, self._seq, self._consumed = None, 0, 0
         threading.Thread(target=self._run, daemon=True).start()
@@ -377,6 +450,9 @@ class CameraFeed:
 
     def rtt(self):
         return {}
+
+    def wire_stats(self, window=30.0):
+        return None
 
     def wait_meta(self, after_t_ms, timeout=0.5):
         time.sleep(timeout)

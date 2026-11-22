@@ -77,6 +77,28 @@ def test_reader_survives_errors():
     print("reader survives errors ok")
 
 
+def test_wire_stats():
+    """The laptop measures what really arrived over the Wi-Fi: rate, size and the gaps between pictures; and parses the Pi's own
+    'V' report."""
+    feed = receiver.FrameFeed.__new__(receiver.FrameFeed)
+    from collections import deque
+    feed._arrivals = deque(maxlen=600)
+    assert feed.wire_stats() is None, "not enough data yet"
+    now = time.time()
+    for i in range(40):                                   # 40 pictures of 30 KB, 66 ms apart, with one 400 ms stall
+        t = now - 3.0 + i * 0.066 + (0.334 if i >= 20 else 0.0)
+        feed._arrivals.append((t, 30 * 1024, 80.0 + (i % 5)))     # each picture took 80-84 ms to arrive
+    s = feed.wire_stats()
+    assert s["kb"] == 30.0 and s["n"] == 40 and s["over_200"] == 1 and 395 < s["gap_max"] < 405, s
+    assert 60 < s["gap_p50"] < 70 and s["gap_p95"] < 400, s
+    assert 80 <= s["delay_p50"] <= 84 and s["delay_p95"] <= 84, s
+    assert receiver.parse_pongs("P u1 123.5\nP s2") == [("u1", 123.5), ("s2", None)] and receiver.parse_stamp("E 1 x\nF 55.25") == 55.25
+    assert receiver.parse_video_stats("V 14.8 21.3 3.2 18") == {"fps": 14.8, "kb": 21.3, "encode_ms": 3.2, "cpu_pct": 18.0}
+    assert receiver.parse_video_stats("V 1 2 3") is None and receiver.parse_video_stats("C ok 0.1") is None
+    print("wire stats ok")
+
+
 if __name__ == "__main__":
     test()
     test_reader_survives_errors()
+    test_wire_stats()

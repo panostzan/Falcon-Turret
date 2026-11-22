@@ -192,6 +192,19 @@ def depth_map(frame):
     return sm.current(now, thumb)
 
 
+def video_wire():
+    """Pictures as they arrived over the Wi-Fi (rate, size, gaps), measured at the laptop's end."""
+    f = feed_ref["feed"]
+    return f.wire_stats() if (f and hasattr(f, "wire_stats")) else None
+
+
+def pi_video():
+    """The Pi's own measurements of its video work (rate, KB sent, encode time, CPU) if it reported within the last 3 s."""
+    f = feed_ref["feed"]
+    pv = getattr(f, "pi_video", None) if f else None
+    return dict(pv) if (pv and time.time() - getattr(f, "pi_video_at", 0.0) < 3.0) else None
+
+
 def camera_summary():
     """Why there may be no picture, for the dashboard: what the Pi says about its camera (fresh within 3 s), or nothing."""
     f = feed_ref["feed"]
@@ -328,11 +341,12 @@ def process(jpg, ts=None):
     qs = qnx_status() if tracker.armed else None
     if qs is not None:                                        # the answer came from the tracker running on QNX
         fh, fw = frame.shape[:2]
+        sx, sy = fw / SRC_W, fh / SRC_H                   # the Pi reports in its 640x480 picture; the one we draw on may be smaller
         face = None
         if qs["found"]:
-            cx = fw - qs["cx"] if view["mirror"] else qs["cx"]
-            cy = fh - qs["cy"] if view["vflip"] else qs["cy"]
-            face = (cx, cy, qs["w"], qs["h"])
+            cx = fw - qs["cx"] * sx if view["mirror"] else qs["cx"] * sx
+            cy = fh - qs["cy"] * sy if view["vflip"] else qs["cy"] * sy
+            face = (cx, cy, qs["w"] * sx, qs["h"] * sy)
         tracker.confidence, tracker.conf_parts, tracker.blob = (qs["confidence"] if face else 0.0), {}, None
         if engage.armed and not qs["armed"] and time.time() - qnx_sync["arm_cmd"] > 1.5:
             engage.arm(False, now)                            # QNX disarmed (watchdog or its own rules): follow it
@@ -510,7 +524,8 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/system":
             self._send(json.dumps(system_stats()).encode())
         elif self.path == "/state":
-            self._send(json.dumps(dict(latest["state"], frame_age=round(time.time() - last_frame_t[0], 1), camera=camera_summary())).encode())
+            self._send(json.dumps(dict(latest["state"], frame_age=round(time.time() - last_frame_t[0], 1), camera=camera_summary(),
+                                       video_wire=video_wire(), pi_video=pi_video())).encode())
         elif self.path == "/telemetry":
             snap, now = telemetry.snapshot(), time.time()
             snap["events"] = [[round(now - t, 1), text] for t, text in list(engage.events)[-14:]]
