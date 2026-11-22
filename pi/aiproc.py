@@ -115,6 +115,6 @@ def build(push, root=None):
     if not (os.path.exists(binary) and os.path.exists(model)):
         return None
     env = dict(os.environ)
-    libs = library_dirs(os.path.join(root, "fwbuild"))
+    libs = library_dirs(os.path.join(root, "build")) + library_dirs(os.path.join(root, "fwbuild"))
     env["LD_LIBRARY_PATH"] = ":".join(libs + ([env["LD_LIBRARY_PATH"]] if env.get("LD_LIBRARY_PATH") else []))
     return FaceWatch(push, ["on", "-p", "10", binary, model], env=env)
